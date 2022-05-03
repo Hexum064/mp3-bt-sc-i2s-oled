@@ -1,0 +1,11 @@
+idf_component_register(SRCS  "Fifo.cpp" "I2SOutput.cpp" "Output.cpp" "SDCard.cpp" "bt_app_core.cpp" "BT_a2dp.cpp" "MP3Player.cpp" "FileNavi.cpp" "main.cpp"
+                    INCLUDE_DIRS "." 
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/profile/std/include" 
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/common/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/common/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/stack/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/bta/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/common/btc/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/profile/std/a2dp/include"
+                    "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/external/sbc/encoder/include")

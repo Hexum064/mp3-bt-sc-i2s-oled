@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+M:/ESP32/mp3-bt-sc-i2s-oled/build/CMakeFiles/bootloader
+M:/ESP32/mp3-bt-sc-i2s-oled/build/CMakeFiles/bootloader.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/CMakeFiles/bootloader-complete.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+M:/ESP32/mp3-bt-sc-i2s-oled/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
