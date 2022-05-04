@@ -11,6 +11,9 @@
 #include <driver/gpio.h>
 #include "I2SOutput.h"
 
+extern "C" {
+	#include "btc_av.h"
+}
 
 #define CONFIG_SPEAKER_NAME "Q50"
 #define BYTE_SAMPLES_PER_FRAME (MINIMP3_MAX_SAMPLES_PER_FRAME * 2) //MINIMP3_MAX_SAMPLES_PER_FRAME is number of short samples so this is for total bytes

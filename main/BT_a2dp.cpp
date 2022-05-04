@@ -704,12 +704,12 @@ bool BT_a2db::connect_bluetooth(esp_bd_addr_t speaker_address)
 }
 
 
-int get_media_state()
+int BT_a2db::get_media_state()
 {
 	return s_media_state;
 }
 
-int get_a2d_state()
+int BT_a2db::get_a2d_state()
 {
 	return s_a2d_state;
 }
