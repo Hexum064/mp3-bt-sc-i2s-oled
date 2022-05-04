@@ -93,9 +93,15 @@ i2s_pin_config_t i2s_speaker_pins = {
 
 }
 
+uint8_t left_over[1024];
+uint16_t prev_val0;
+uint16_t prev_val1;
+int left_over_count = 0;
+#define UPSAMPLE_INT (12 * 2) //* 2 because 1 sample is both left and right
+
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 {
-	uint16_t val;
+	uint16_t val = 0;
 	short * buff = buff0;
 	int shortLen = len >> 1;
 	//static uint16_t sample_rate = 0;
@@ -115,32 +121,111 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	} 
 
 
-	//We can do this because the sample size is 2304 x 16bit, or 4608 x 8bit, and the len size is 512 x 8bit and, since 512 divides evenly in 4608, we will just rely on that
-	for (int i = 0; i < shortLen; i++ )
+	if (current_sample_rate == 48000)
 	{
-			val = buff[buff_pos + i] + 0x7fff;
-			val *= (output_volume / MAX_VOL) / 2;
-			data[(i << 1)] = val & 0xff;
-			data[(i << 1) + 1] = (val >> 8) & 0xff;	
+		//We can do this because the sample size is 2304 x 16bit, or 4608 x 8bit, and the len size is 512 x 8bit and, since 512 divides evenly in 4608, we will just rely on that
+		for (int i = 0; i < shortLen; i++ )
+		{
+				val = buff[buff_pos + i] + 0x7fff;
+				val *= (output_volume / MAX_VOL) / 2;
+				data[(i << 1)] = val & 0xff;
+				data[(i << 1) + 1] = (val >> 8) & 0xff;	
+		}
+		buff_pos += shortLen;
+		if (buff_pos == MINIMP3_MAX_SAMPLES_PER_FRAME * 2)
+		{
+			//ESP_LOGI("main", "buff swap");
+			if (buff_num)
+			{
+				buff_num = 0;
+			}
+			else
+			{
+				buff_num = 1;
+			}
+
+			buff_pos = 0;		
+			vTaskResume(mp3TaskHandle);	
+		}
+
+	}
+	else //assume 44.1K
+	{
+		for (int i = 0; i < shortLen; i++ )
+		{
+
+
+
+			if (i % UPSAMPLE_INT == 0) // If we've reached the 12th sample, insert a fake sample
+			{
+				//printf("Adding fake sample at %d\n", i);
+				//adding 2 values because we have to fill both left and right
+				data[(i << 1)] = prev_val0 & 0xff;
+				data[(i << 1) + 1] = (prev_val0 >> 8) & 0xff;	
+				i++;
+				data[(i << 1)] = prev_val1 & 0xff;
+				data[(i << 1) + 1] = (prev_val1 >> 8) & 0xff;	
+					
+
+			}
+			else if (left_over_count > 0)
+			{
+				//printf("Using leftover: %d\n", left_over_count);
+				val = left_over[i] + 0x7fff;
+				val *= (output_volume / MAX_VOL) / 2;
+				left_over_count--;
+			}
+			else
+			{
+				val = buff[buff_pos + i] + 0x7fff;
+				val *= (output_volume / MAX_VOL) / 2;
+				data[(i << 1)] = val & 0xff;
+				data[(i << 1) + 1] = (val >> 8) & 0xff;	
+
+				//Only update the buff_pos when we are adding directly from it
+				buff_pos++;
+			}
+
+
+			if (i % 2 == 1)
+			{
+				prev_val1 = val;
+			}
+			else
+			{
+				prev_val0 = val;
+			}
+
+		}
+//printf("buff_pos: %d\n", buff_pos);
+		if (buff_pos >= ((MINIMP3_MAX_SAMPLES_PER_FRAME * 2) - 512))
+		{
+			
+			left_over_count = (MINIMP3_MAX_SAMPLES_PER_FRAME * 2) - buff_pos;
+printf("swapping buffs. left_over_cout: %d, buff_pos: %d\n", left_over_count, buff_pos);
+			memcpy(left_over, buff + buff_pos, left_over_count * 2);
+
+
+			//ESP_LOGI("main", "buff swap");
+			if (buff_num)
+			{
+				buff_num = 0;
+			}
+			else
+			{
+				buff_num = 1;
+			}
+
+			buff_pos = 0;		
+			vTaskResume(mp3TaskHandle);	
+		}		
 	}
 
-	buff_pos += shortLen;
+	
 
-	if (buff_pos == MINIMP3_MAX_SAMPLES_PER_FRAME * 2)
-	{
-		//ESP_LOGI("main", "buff swap");
-		if (buff_num)
-		{
-			buff_num = 0;
-		}
-		else
-		{
-			buff_num = 1;
-		}
 
-		buff_pos = 0;		
-		vTaskResume(mp3TaskHandle);	
-	}
+
+
 
 	return len;
 
@@ -467,6 +552,24 @@ void vMp3Decode( void * pvParameters )
 				output->start(player->info.hz);
 				current_sample_rate = player->info.hz;
 				ESP_LOGI("main", "i2s output started");
+
+				if (sample_rate != current_sample_rate)
+				{
+					sample_rate = current_sample_rate;
+
+					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+					{
+						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
+						vTaskDelay(pdMS_TO_TICKS(1000));
+						set_freq(current_sample_rate);
+						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+					}
+					else
+					{
+						set_freq(current_sample_rate);
+					}
+					
+				}
 			}
 
 			// if (has_started)
@@ -486,7 +589,23 @@ void vMp3Decode( void * pvParameters )
 				current_sample_rate = player->info.hz;
 				ESP_LOGI("main", "i2s output started");
 
+				if (sample_rate != current_sample_rate)
+				{
+					sample_rate = current_sample_rate;
 
+					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+					{
+						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
+						vTaskDelay(pdMS_TO_TICKS(1000));
+						set_freq(current_sample_rate);
+						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+					}
+					else
+					{
+						set_freq(current_sample_rate);
+					}
+					
+				}
 				
 			}
 
