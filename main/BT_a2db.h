@@ -59,8 +59,9 @@ class BT_a2db
         BT_a2db(esp_a2d_source_data_cb_t callback);
         bool discover_bluetooth(const char * speaker_name);
 		bool connect_bluetooth(esp_bd_addr_t speaker_address);
-		void switch_to_44100_sample_rate();
-		void switch_to_48000_sample_rate();
+		int get_media_state();
+		int get_a2d_state();
+
 };
 
 

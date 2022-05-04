@@ -51,7 +51,7 @@ const char* bt_speaker_name;
 
 BT_a2db::BT_a2db(esp_a2d_source_data_cb_t callback)
 {
-	btc_av_sample_freq = 44100;
+
     data_callback = callback;
     esp_err_t results = esp_wifi_stop();
 
@@ -88,6 +88,7 @@ BT_a2db::BT_a2db(esp_a2d_source_data_cb_t callback)
 		return;
 	}
 }
+
 
 //------START BLUETOOTH -----
 
@@ -702,18 +703,15 @@ bool BT_a2db::connect_bluetooth(esp_bd_addr_t speaker_address)
 
 }
 
-void BT_a2db::switch_to_44100_sample_rate()
+
+int BT_a2db::get_media_state()
 {
-	//esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-	//btc_av_sample_freq = 44100;
-	esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+	return s_media_state;
 }
 
-void BT_a2db::switch_to_48000_sample_rate()
+int BT_a2db::get_a2d_state()
 {
-	//esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);	
-	//btc_av_sample_freq = 48000;
-	esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+	return s_a2d_state;
 }
 
 //------END BLUETOOTH-----

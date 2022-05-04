@@ -48,7 +48,9 @@
         "btc_manage.h": "c",
         "btc_av_co.h": "c",
         "sbc_encoder.h": "c",
-        "future": "cpp"
+        "future": "cpp",
+        "esp_a2dp_api.h": "c",
+        "btc_av_api.h": "c"
     },
     "idf.flashType": "UART",
     "cSpell.words": [
