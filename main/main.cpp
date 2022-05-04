@@ -96,6 +96,27 @@ i2s_pin_config_t i2s_speaker_pins = {
 
 }
 
+void init_display()
+{
+
+
+	ESP_LOGI("main", "INTERFACE is i2c");
+	ESP_LOGI("main", "CONFIG_SDA_GPIO=%d",CONFIG_SDA_GPIO);
+	ESP_LOGI("main", "CONFIG_SCL_GPIO=%d",CONFIG_SCL_GPIO);
+	ESP_LOGI("main", "CONFIG_RESET_GPIO=%d",CONFIG_RESET_GPIO);
+	i2c_master_init(&dev, (gpio_num_t)CONFIG_SDA_GPIO, (gpio_num_t)CONFIG_SCL_GPIO, (gpio_num_t)CONFIG_RESET_GPIO);
+
+	#if CONFIG_FLIP
+		dev._flip = true;
+		ESP_LOGW("main", "Flip upside down");
+	#endif
+
+	ESP_LOGI("main", "Panel is 128x64");
+	ssd1306_init(&dev, 128, 64);
+	ssd1306_clear_screen(&dev, false);
+	ssd1306_contrast(&dev, 0xff);
+}
+
 
 #define UPSAMPLE_INT (12 * 2) //* 2 because 1 sample is both left and right
 
@@ -422,13 +443,6 @@ void vMp3Decode( void * pvParameters )
 		short * fillBuff;
 
 		player = new MP3Player(FileNavi::get_current_full_name());
-
-		// player->decodeSample(buff0, &sample_len);
-		// player->decodeSample(buff0 + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len);
-		
-		// player->decodeSample(buff1, &sample_len);
-		// player->decodeSample(buff1 + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len);
-
 		
 		//ESP_LOGI("main", "starting decode.");
 		f_change_file = false;
@@ -442,13 +456,7 @@ void vMp3Decode( void * pvParameters )
 			//Only pause after we have started the output (decoding has actually happened)
 			if (player->is_output_started)
 			{
-
-				//if (!i2s_output)
-				{
-					//ESP_LOGI("main", "Suspending.");
-					vTaskSuspend( mp3TaskHandle );
-					//ESP_LOGI("main", "Resuming.");
-				}
+				vTaskSuspend( mp3TaskHandle );
 			}
 
 			
@@ -482,7 +490,9 @@ void vMp3Decode( void * pvParameters )
 					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
 					{
 						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(1000));
+						vTaskDelay(pdMS_TO_TICKS(100));
+						// printf("Media state: %d\n", bt_control->get_media_state());
+						// printf("a2d state: %d\n", bt_control->get_a2d_state());
 						set_freq(current_sample_rate);
 						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 					}
@@ -493,11 +503,6 @@ void vMp3Decode( void * pvParameters )
 					
 				}
 			}
-
-			// if (has_started)
-			// {
-			// 	output->write(fillBuff, sample_len);
-			// }
 
 			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
 			total_samples += sample_len;
@@ -518,8 +523,10 @@ void vMp3Decode( void * pvParameters )
 					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
 					{
 						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(1000));
+						vTaskDelay(pdMS_TO_TICKS(100));
 						set_freq(current_sample_rate);
+						// printf("Media state: %d\n", bt_control->get_media_state());
+						// printf("a2d state: %d\n", bt_control->get_a2d_state());
 						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 					}
 					else
@@ -530,34 +537,6 @@ void vMp3Decode( void * pvParameters )
 				}
 				
 			}
-
-			// if (BT_a2db::ready)
-			// {
-			// 	if (current_sample_rate != sample_rate)
-			// 	{
-			// 		if (current_sample_rate == 44100)
-			// 		{
-			// 			printf("switching to 44100\n");
-			// 			bt_control->switch_to_44100_sample_rate();
-			// 		} 
-			// 		else // assume 48000 sample rate
-			// 		{
-			// 			printf("switching to 48000\n");
-			// 			bt_control->switch_to_48000_sample_rate();
-			// 		}
-
-			// 		sample_rate = current_sample_rate; //so this block only gets called if the sample rate changes
-			// 	}
-
-
-
-			// }
-
-
-			// if (has_started)
-			// {
-			// 	output->write(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, sample_len);
-			// }
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
@@ -572,10 +551,9 @@ void vMp3Decode( void * pvParameters )
 
 		}
 
-		//if (i2s_output)
-		{
-			output->stop();
-		}
+
+		output->stop();
+
 
 		player->dispose();
 		
