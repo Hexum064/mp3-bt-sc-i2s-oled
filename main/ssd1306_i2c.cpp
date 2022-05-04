@@ -13,7 +13,7 @@
 #define I2C_NUM I2C_NUM_0
 //#define I2C_NUM I2C_NUM_1
 
-#define I2C_MASTER_FREQ_HZ 400000 /*!< I2C master clock frequency. no higher than 1MHz for now */
+#define I2C_MASTER_FREQ_HZ 1000000 /*!< I2C master clock frequency. no higher than 1MHz for now */
 
 void i2c_master_init(SSD1306_t * dev, gpio_num_t sda, gpio_num_t scl, gpio_num_t reset)
 {
