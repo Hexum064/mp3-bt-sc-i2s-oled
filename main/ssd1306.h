@@ -21,6 +21,8 @@ Usage:
 0xC0 : Single Data byte 
 0x40 : Data Stream
 */
+#define CONFIG_OFFSETX 0
+
 #define OLED_CONTROL_BYTE_CMD_SINGLE    0x80
 #define OLED_CONTROL_BYTE_CMD_STREAM    0x00
 #define OLED_CONTROL_BYTE_DATA_SINGLE   0xC0

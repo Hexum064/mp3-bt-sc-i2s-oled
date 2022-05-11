@@ -50,7 +50,8 @@
         "sbc_encoder.h": "c",
         "future": "cpp",
         "esp_a2dp_api.h": "c",
-        "btc_av_api.h": "c"
+        "btc_av_api.h": "c",
+        "*.inc": "cpp"
     },
     "idf.flashType": "UART",
     "cSpell.words": [

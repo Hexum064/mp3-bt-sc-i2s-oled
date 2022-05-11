@@ -10,6 +10,7 @@
 #include "Fifo.h"
 #include <driver/gpio.h>
 #include "I2SOutput.h"
+#include "ssd1306_i2c.h"
 
 extern "C" {
 	#include "btc_av.h"
@@ -27,6 +28,12 @@ extern "C" {
 #define BUTTON_BIT_0 GPIO_NUM_2
 #define BUTTON_BIT_1 GPIO_NUM_16
 #define BUTTON_BIT_2 GPIO_NUM_17
+
+#define DISPLAY_SDA	GPIO_NUM_21
+#define DISPLAY_SCL GPIO_NUM_22
+#define DISPLAY_RST GPIO_NUM_NC
+
+#define OLED_DISP_INT 250
 
 #define SHORT_BUTTON_PUSH 50000ULL
 #define LONG_BUTTON_HOLD 750000ULL
@@ -61,8 +68,12 @@ int buff_pos = 0;
 i2s_pin_config_t i2s_speaker_pins;
 int total_samples = 0;
 uint16_t current_sample_rate = 0;
+uint64_t mp3_run_time = 0;
+char * full_path;
+uint16_t full_path_len = 0;
 
 BT_a2db *bt_control;
+SSD1306_t oled_display;
 
 // static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len);
 
@@ -101,24 +112,137 @@ void init_display()
 
 
 	ESP_LOGI("main", "INTERFACE is i2c");
-	ESP_LOGI("main", "CONFIG_SDA_GPIO=%d",CONFIG_SDA_GPIO);
-	ESP_LOGI("main", "CONFIG_SCL_GPIO=%d",CONFIG_SCL_GPIO);
-	ESP_LOGI("main", "CONFIG_RESET_GPIO=%d",CONFIG_RESET_GPIO);
-	i2c_master_init(&dev, (gpio_num_t)CONFIG_SDA_GPIO, (gpio_num_t)CONFIG_SCL_GPIO, (gpio_num_t)CONFIG_RESET_GPIO);
+	ESP_LOGI("main", "CONFIG_SDA_GPIO=%d",DISPLAY_SDA);
+	ESP_LOGI("main", "CONFIG_SCL_GPIO=%d",DISPLAY_SCL);
+	ESP_LOGI("main", "CONFIG_RESET_GPIO=%d",DISPLAY_RST);
+	i2c_master_init(&oled_display, (gpio_num_t)DISPLAY_SDA, (gpio_num_t)DISPLAY_SCL, (gpio_num_t)DISPLAY_RST);
 
-	#if CONFIG_FLIP
-		dev._flip = true;
-		ESP_LOGW("main", "Flip upside down");
-	#endif
+	// #if CONFIG_FLIP
+	// 	oled_display._flip = true;
+	// 	ESP_LOGW("main", "Flip upside down");
+	// #endif
 
 	ESP_LOGI("main", "Panel is 128x64");
-	ssd1306_init(&dev, 128, 64);
-	ssd1306_clear_screen(&dev, false);
-	ssd1306_contrast(&dev, 0xff);
+	ssd1306_init(&oled_display, 128, 64);
+	ssd1306_clear_screen(&oled_display, false);
+	ssd1306_contrast(&oled_display, 0xff);
+
+
+
+
+	ssd1306_display_text(&oled_display, 0, "BigFuckingBadge", 15, false);
+	ssd1306_display_text(&oled_display, 1, "Fox's Random", 12, false);
+	ssd1306_display_text(&oled_display, 2, " Access Memories", 16, false);
+	ssd1306_display_text(&oled_display, 3, "DC30", 4, false);
+
 }
 
+void toggle_play_pause()
+{
+	//Don't want to play or pause in this mode 
+	if (bt_discovery_mode)
+	{
+		return;
+	}
 
-#define UPSAMPLE_INT (12 * 2) //* 2 because 1 sample is both left and right
+	playing = !playing;
+
+
+
+	printf(playing ? "Playing\n" : "Paused\n");
+}
+
+void toggle_output()
+{
+	if (bt_enabled)
+	{
+		i2s_output = !i2s_output;
+	}
+	else
+	{
+		i2s_output = true;
+	}
+}
+
+void volume_up()
+{
+	if (output_volume < MAX_VOL)
+	{
+		output_volume += VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}
+}
+
+void volume_down()
+{
+	if (output_volume > 0)
+	{
+		output_volume -= VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}		
+}
+
+void play_next_song()
+{
+	//Don't want to change songs in this mode 
+	if (bt_discovery_mode)
+	{
+		return;
+	}
+
+	ESP_LOGI("main", "Going to next file.");
+	FileNavi::goto_next_mp3();
+	full_path = FileNavi::get_current_full_name();
+	full_path_len = strlen(full_path);
+	f_change_file = true;
+	vTaskResume(mp3TaskHandle);	
+}
+
+void play_previous_song()
+{
+	//Don't want to change songs in this mode 
+	if (bt_discovery_mode)
+	{
+		return;
+	}
+
+	ESP_LOGI("main", "Going to previous file.");
+	//if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
+	FileNavi::goto_prev_mp3();
+	full_path = FileNavi::get_current_full_name();
+	full_path_len = strlen(full_path);
+	f_change_file = true;
+	//vTaskResume(mp3TaskHandle);	
+}
+
+void cycle_display()
+{
+
+}
+
+void toggle_nayn_mode()
+{
+
+}
+
+void toggle_bt_discovery_mode()
+{
+	bt_discovery_mode = !bt_discovery_mode;
+}
+
+void scroll_text(char * text, int str_len, int max_len, int start_pos, char * buffer)
+{
+	
+
+	for (int i = 0; i < max_len; i++)
+	{
+		if (i + start_pos > str_len - 1)
+			buffer[i] = ' ';
+		else
+			buffer[i] = text[i + start_pos];
+	}
+
+}
 
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 {
@@ -226,94 +350,6 @@ void vI2SOutput( void * pvParameters )
 }
 
 
-void toggle_play_pause()
-{
-	//Don't want to play or pause in this mode 
-	if (bt_discovery_mode)
-	{
-		return;
-	}
-
-	playing = !playing;
-
-
-
-	printf(playing ? "Playing\n" : "Paused\n");
-}
-
-void toggle_output()
-{
-	if (bt_enabled)
-	{
-		i2s_output = !i2s_output;
-	}
-	else
-	{
-		i2s_output = true;
-	}
-}
-
-void volume_up()
-{
-	if (output_volume < MAX_VOL)
-	{
-		output_volume += VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}
-}
-
-void volume_down()
-{
-	if (output_volume > 0)
-	{
-		output_volume -= VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}		
-}
-
-void play_next_song()
-{
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
-	{
-		return;
-	}
-
-	ESP_LOGI("main", "Going to next file.");
-	FileNavi::goto_next_mp3();
-	f_change_file = true;
-	vTaskResume(mp3TaskHandle);	
-}
-
-void play_previous_song()
-{
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
-	{
-		return;
-	}
-
-	ESP_LOGI("main", "Going to previous file.");
-	//if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
-	FileNavi::goto_prev_mp3();
-	f_change_file = true;
-	//vTaskResume(mp3TaskHandle);	
-}
-
-void cycle_display()
-{
-
-}
-
-void toggle_nayn_mode()
-{
-
-}
-
-void toggle_bt_discovery_mode()
-{
-	bt_discovery_mode = !bt_discovery_mode;
-}
 
 void vButtonInput( void * pvParameters )
 {
@@ -428,7 +464,11 @@ void vButtonInput( void * pvParameters )
 
 void vMp3Decode( void * pvParameters )
 {
-	static uint16_t sample_rate = 0;
+	uint16_t sample_rate = 0;
+	uint32_t sample_count = 0;
+	FileNavi::goto_first_mp3();
+	full_path = FileNavi::get_current_full_name();
+	full_path_len = strlen(full_path);
 
 	ESP_LOGI("main", "starting mp3 decode task");
 	
@@ -471,12 +511,12 @@ void vMp3Decode( void * pvParameters )
 
 			//ESP_LOGI("main", "decoding samples.");
 			player->decodeSample(fillBuff, &sample_len);
-			total_samples = sample_len;
+			total_samples += sample_len;
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
 
-
+				total_samples = 0;
 				has_started = true;
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
@@ -509,7 +549,7 @@ void vMp3Decode( void * pvParameters )
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
 
-				
+				total_samples = 0;
 				has_started = true;
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
@@ -560,7 +600,86 @@ void vMp3Decode( void * pvParameters )
 	}
 }
 
+void vDisplayUpdate(void * pvParameters)
+{
+	int scroll_pos = 0;
+	int totalSeconds = 0;
+	int minutes = totalSeconds / 60;
+	int seconds = totalSeconds % 60;
+	char disp_buff[24];	
+	char file_name_buff[MAX_CHARS];
 
+	init_display(); //eventually move to display task
+
+	vTaskDelay(pdMS_TO_TICKS(3000));
+
+
+	while (1)
+	{
+
+		totalSeconds = (int)(total_samples / current_sample_rate);
+		//printf("samples: %d, rate: %d, seconds %d\n", total_samples, current_sample_rate, (int)(total_samples / current_sample_rate));
+		minutes = totalSeconds / 60;
+		seconds = totalSeconds % 60;
+
+		scroll_pos++;
+
+		if (scroll_pos > full_path_len - MAX_CHARS)	
+			scroll_pos = 0;
+
+		scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, file_name_buff);
+
+		disp_buff[0] = '\0';
+
+		if (playing)
+		{
+			sprintf(disp_buff, "%02d:%02d Playing", minutes, seconds);	
+		}
+		else
+		{
+			sprintf(disp_buff, "%02d:%02d Paused ", minutes, seconds);	
+		}
+
+
+
+		ssd1306_display_text(&oled_display, 0, file_name_buff, strlen(file_name_buff), false);
+		ssd1306_display_text(&oled_display, 1, disp_buff, strlen(disp_buff), false);
+
+		disp_buff[0] = '\0';
+
+		if (i2s_output)
+		{
+			sprintf(disp_buff, "Vol:%02d%% Out:i2s ", (int)((output_volume / MAX_VOL) * 100));	
+		}
+		else
+		{
+			sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
+		}
+		
+		ssd1306_display_text(&oled_display, 2, disp_buff, strlen(disp_buff), false);
+
+		disp_buff[0] = '\0';
+
+		if (bt_control->get_a2d_state() != 5)
+		{
+			sprintf(disp_buff, "BT Connecting...");	
+		}
+		else
+		{
+			sprintf(disp_buff, "BT Connected    ");	
+		}
+		
+		ssd1306_display_text(&oled_display, 3, disp_buff, strlen(disp_buff), false);
+		ssd1306_display_text(&oled_display, 4, "<BT SINK NAME>", strlen("<BT SINK NAME>"), false);
+
+		ssd1306_display_text(&oled_display, 5, "<DISPLAY MODE>", strlen("<DISPLAY MODE>"), false);
+
+		ssd1306_display_text(&oled_display, 6, "<BATTERY?>", strlen("<BATTERY?>"), false);
+
+
+		vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
+	}
+}
 
 
 extern "C" void app_main(void)
@@ -575,13 +694,13 @@ extern "C" void app_main(void)
 	//i2s_output = true;
 
 	SDCard* sdc = new SDCard();
-
 	sdc->init();
 
-	FileNavi::goto_first_mp3();
 
-	//init_audio_out();
 
+
+
+	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
