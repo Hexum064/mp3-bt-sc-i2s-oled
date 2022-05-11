@@ -464,8 +464,8 @@ void vButtonInput( void * pvParameters )
 
 void vMp3Decode( void * pvParameters )
 {
-	static uint16_t sample_rate = 0;
-	
+	uint16_t sample_rate = 0;
+	uint32_t sample_count = 0;
 	FileNavi::goto_first_mp3();
 	full_path = FileNavi::get_current_full_name();
 	full_path_len = strlen(full_path);
@@ -511,12 +511,12 @@ void vMp3Decode( void * pvParameters )
 
 			//ESP_LOGI("main", "decoding samples.");
 			player->decodeSample(fillBuff, &sample_len);
-			total_samples = sample_len;
+			total_samples += sample_len;
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
 
-
+				total_samples = 0;
 				has_started = true;
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
@@ -549,7 +549,7 @@ void vMp3Decode( void * pvParameters )
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
 
-				
+				total_samples = 0;
 				has_started = true;
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
@@ -603,7 +603,7 @@ void vMp3Decode( void * pvParameters )
 void vDisplayUpdate(void * pvParameters)
 {
 	int scroll_pos = 0;
-	int totalSeconds = mp3_run_time / 1000000;
+	int totalSeconds = 0;
 	int minutes = totalSeconds / 60;
 	int seconds = totalSeconds % 60;
 	char disp_buff[24];	
@@ -617,7 +617,8 @@ void vDisplayUpdate(void * pvParameters)
 	while (1)
 	{
 
-		totalSeconds = mp3_run_time / 1000000;
+		totalSeconds = (int)(total_samples / current_sample_rate);
+		//printf("samples: %d, rate: %d, seconds %d\n", total_samples, current_sample_rate, (int)(total_samples / current_sample_rate));
 		minutes = totalSeconds / 60;
 		seconds = totalSeconds % 60;
 
