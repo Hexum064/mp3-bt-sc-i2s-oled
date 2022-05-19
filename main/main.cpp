@@ -1,3 +1,5 @@
+#define FIXED_POINT 16
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -12,7 +14,13 @@
 #include "I2SOutput.h"
 #include "ssd1306_i2c.h"
 
+	#include "kiss_fft.h"
+	#include "kiss_fftr.h"
+
+#include <math.h>
+
 extern "C" {
+
 	#include "btc_av.h"
 }
 
@@ -48,7 +56,11 @@ extern "C" {
 
 #define MAX_VOL 4096
 #define VOL_STEP (MAX_VOL / 16)
-#define DEBUG
+//#define DEBUG
+
+#define FFT_SAMPLE_SIZE_POWER 11
+#define FFT_SAMPLE_SIZE (1 << FFT_SAMPLE_SIZE_POWER) 
+#define FFT_BINS 8
 
 TaskHandle_t mp3TaskHandle = NULL;
 
@@ -74,6 +86,156 @@ uint16_t full_path_len = 0;
 
 BT_a2db *bt_control;
 SSD1306_t oled_display;
+
+uint64_t max_v =0;
+#define VAL_OFFSET 1024
+
+uint16_t get_bar_mag(int64_t real, int64_t imaginary)
+{
+	// uint32_t val = (uint32_t)sqrt((real * real) + (imaginary * imaginary));
+uint32_t val = abs(real) + abs(imaginary);
+
+	// if (val > max_v)
+	// {
+	// 	printf("real: %lld, img: %lld, %llu\n", real, imaginary, val);
+	// 	max_v = val;
+	// }
+
+	// if (val <= 1 + VAL_OFFSET)
+	// {
+	// 	return 0x00;
+	// }
+	// else if (val <= 2 + VAL_OFFSET)
+	// {
+	// 	return 0x01;
+	// }
+	// else if (val <= 4 + VAL_OFFSET)
+	// {
+	// 	return 0x03;
+	// }
+	// else if (val <= 8 + VAL_OFFSET)
+	// {
+	// 	return 0x07;
+	// }
+	// else if (val <= 16 + VAL_OFFSET)
+	// {
+	// 	return 0x0F;
+	// }
+	// else if (val <= 32 + VAL_OFFSET)
+	// {
+	// 	return 0x1F;
+	// }
+	// else if (val <= 64 + VAL_OFFSET)
+	// {
+	// 	return 0x3F;	
+	// }
+	// else if (val <= 128 + VAL_OFFSET)
+	// {
+	// 	return 0x7F;
+	// }
+	// else if (val <= 256 + VAL_OFFSET)
+	// {
+	// 	return 0xFF;
+	// }
+	// else if (val <= 512 + VAL_OFFSET)
+	// {
+	// 	return 0x1FF;
+	// }
+	// else if (val <= 1024 + VAL_OFFSET)
+	// {
+	// 	return 0x3FF;
+	// }
+	// else if (val <= 2048 + VAL_OFFSET)
+	// {
+	// 	return 0x7FF;
+	// }
+	// else if (val <= 4096 + VAL_OFFSET)
+	// {
+	// 	return 0xFFF;
+	// }
+	// else if (val <= 8192 + VAL_OFFSET)
+	// {
+	// 	return 0x1FFF;
+	// }
+	// else if (val <= 16384 + VAL_OFFSET)
+	// {
+	// 	return 0x3FFF;
+	// }
+	// else if (val <= 32768 + VAL_OFFSET)
+	// {
+	// 	return 0x7FFF;
+	// }
+	// else
+	// {
+	// 	return 0xFFFF;
+	// }				
+
+	if (val <= VAL_OFFSET)
+	{
+		return 0x01;
+	}
+	else if (val <= VAL_OFFSET * 2)
+	{
+		return 0x03;
+	}
+	else if (val <= VAL_OFFSET * 3)
+	{
+		return 0x07;
+	}
+	else if (val <= VAL_OFFSET * 4)
+	{
+		return 0x0F;
+	}
+	else if (val <= VAL_OFFSET * 5)
+	{
+		return 0x1F;
+	}
+	else if (val <= VAL_OFFSET * 6)
+	{
+		return 0x3F;	
+	}
+	else if (val <= VAL_OFFSET * 7)
+	{
+		return 0x7F;
+	}
+	else if (val <= VAL_OFFSET * 8)
+	{
+		return 0xFF;
+	}
+	else if (val <= VAL_OFFSET * 9)
+	{
+		return 0x1FF;
+	}
+	else if (val <= VAL_OFFSET * 10)
+	{
+		return 0x3FF;
+	}
+	else if (val <= VAL_OFFSET * 1)
+	{
+		return 0x7FF;
+	}
+	else if (val <= VAL_OFFSET * 12)
+	{
+		return 0xFFF;
+	}
+	else if (val <= VAL_OFFSET * 13)
+	{
+		return 0x1FFF;
+	}
+	else if (val <= VAL_OFFSET * 14)
+	{
+		return 0x3FFF;
+	}
+	else if (val <= VAL_OFFSET * 15)
+	{
+		return 0x7FFF;
+	}
+	else
+	{
+		return 0xFFFF;
+	}											
+}
+
 
 // static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len);
 
@@ -464,6 +626,32 @@ void vButtonInput( void * pvParameters )
 
 void vMp3Decode( void * pvParameters )
 {
+
+
+int i, k, l = FFT_SAMPLE_SIZE >> 1, m = l / FFT_BINS;
+int16_t l_channel[FFT_SAMPLE_SIZE];
+int16_t r_channel[FFT_SAMPLE_SIZE];
+uint32_t l_bins[FFT_BINS];
+uint32_t r_bins[FFT_BINS];
+short l_max;
+short r_max;
+int l_max_i = 0;
+int r_max_i = 0;
+uint8_t img_pg0[32];
+uint8_t img_pg1[32];
+
+int32_t l_bins_r[FFT_BINS];
+int32_t r_bins_r[FFT_BINS];
+int32_t l_bins_i[FFT_BINS];
+int32_t r_bins_i[FFT_BINS];
+
+int nfft = FFT_SAMPLE_SIZE ;
+// the various buffers  
+//int16_t* samples = (int16_t*) calloc(nfft, sizeof(int16_t));
+kiss_fft_cpx* spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
+// int16_t* resampled = (int16_t*) calloc(nfft, sizeof(int16_t));
+kiss_fftr_cfg st = kiss_fftr_alloc(nfft, 0, NULL, NULL);
+
 	uint16_t sample_rate = 0;
 	uint32_t sample_count = 0;
 	FileNavi::goto_first_mp3();
@@ -556,6 +744,7 @@ void vMp3Decode( void * pvParameters )
 				current_sample_rate = player->info.hz;
 				ESP_LOGI("main", "i2s output started");
 
+
 				if (sample_rate != current_sample_rate)
 				{
 					sample_rate = current_sample_rate;
@@ -577,6 +766,163 @@ void vMp3Decode( void * pvParameters )
 				}
 				
 			}
+
+
+k = total_samples;
+
+for (i = 0; i < nfft; i++)
+{
+	l_channel[i] = fillBuff[i * 2];
+	r_channel[i] = fillBuff[(i * 2) + 1];
+}
+
+kiss_fftr(st, (kiss_fft_scalar*)l_channel, spectrum);
+
+// fix_fftr(l_channel, FFT_SAMPLE_SIZE_POWER, 0);
+// fix_fftr(r_channel, FFT_SAMPLE_SIZE_POWER, 0);
+
+//Binning
+k = 0;
+l = nfft >> 2;
+l_max = 0;
+r_max = 0;
+l_max_i = 0;
+r_max_i = 0;
+
+for (i = 0 ; i < FFT_BINS ; i++)			
+{
+	l_bins_r[i] = 0;
+	l_bins_i[i] = 0;
+}
+
+//First have are real numbers we will use for max
+for(i = 0; i < l; i++)
+{
+
+	//bins
+	if (i <= 3 * 2)
+	{		
+		l_bins_r[0] += spectrum[i].r;
+		l_bins_i[0] += spectrum[i].i;
+	}
+	else if (i <= 6 * 2)
+	{
+		l_bins_r[1] += spectrum[i].r;
+		l_bins_i[1] += spectrum[i].i;
+	}
+	else if (i <= 13 * 2)
+	{
+		l_bins_r[2] += spectrum[i].r;
+		l_bins_i[2] += spectrum[i].i;		
+	}
+	else if (i <= 27 * 2)
+	{
+		l_bins_r[3] += spectrum[i].r;
+		l_bins_i[3] += spectrum[i].i;		
+	}
+	else if (i <= 55 * 2)
+	{
+		l_bins_r[4] += spectrum[i].r;
+		l_bins_i[4] += spectrum[i].i;		
+	}
+	else if (i <= 112 * 2)
+	{
+		l_bins_r[5] += spectrum[i].r;
+		l_bins_i[5] += spectrum[i].i;		
+	}
+	else if (i <= 229 * 2)
+	{
+		l_bins_r[6] += spectrum[i].r;
+		l_bins_i[6] += spectrum[i].i;		
+	}
+	else 
+	{
+		l_bins_r[7] += spectrum[i].r;
+		l_bins_i[7] += spectrum[i].i;		
+	}
+	// if (i<=3 )           {l_bins[0]  += l_channel[i]; r_bins[0]  += r_channel[i];}
+	// if (i>3   && i<=6  ) {l_bins[1]  += l_channel[i]; r_bins[1]  += r_channel[i];}
+	// if (i>6   && i<=13 ) {l_bins[2]  += l_channel[i]; r_bins[2]  += r_channel[i];}
+	// if (i>13  && i<=27 ) {l_bins[3]  += l_channel[i]; r_bins[3]  += r_channel[i];}
+	// if (i>27  && i<=55 ) {l_bins[4]  += l_channel[i]; r_bins[4]  += r_channel[i];}
+	// if (i>55  && i<=112) {l_bins[5]  += l_channel[i]; r_bins[5]  += r_channel[i];}
+	// if (i>112 && i<=229) {l_bins[6]  += l_channel[i]; r_bins[6]  += r_channel[i];}
+	// if (i>229          ) {l_bins[7]  += l_channel[i]; r_bins[7]  += r_channel[i];}	
+
+	// if ((i % m) == (m - 1))
+	// {
+		
+	// 	l_bins[k] = sqrt((uint32_t)(l_channel[l_max_i] * l_channel[l_max_i]) + (uint32_t)(l_channel[l_max_i + l] * l_channel[l_max_i + l]));
+	// 	r_bins[k] = sqrt((uint32_t)(r_channel[r_max_i] * r_channel[r_max_i]) + (uint32_t)(r_channel[r_max_i + l] * r_channel[r_max_i + l]));
+	// 	//printf("setting max at %d, l=%d, r=%d, l=%d, r=%d\n", i, l_max_i, r_max_i, l_bins[k], r_bins[k]);
+	// 	l_max = 0;
+	// 	r_max = 0;
+
+	// 	k++;
+	// }
+
+	// if (l_channel[i] > l_max)
+	// {
+	// 	l_max = l_channel[i];
+	// 	l_max_i = i;
+	// }
+
+	// if (r_channel[i] > r_max)
+	// {
+	// 	r_max = r_channel[i];
+	// 	r_max_i = i;
+	// }	
+
+	// l_max = ((l_channel[i] > l_max) ? l_channel[i] : l_max);
+	// r_max = ((r_channel[i] > r_max) ? r_channel[i] : r_max);
+	
+}
+
+uint16_t l_val = 0;
+uint16_t r_val = 0;
+
+for (i = 0 ; i < FFT_BINS ; i++)			
+{
+	l_val = get_bar_mag(l_bins_r[i], l_bins_i[i]);
+	printf("Bin %d, val %d\n", i, l_val);
+	img_pg0[(i * 2) + 0] = l_val & 0xff;
+	img_pg0[(i * 2) + 1] = img_pg0[(i * 2) + 0];
+	
+// 	img_pg0[(i * 4) + 2] = r_max & 0xff;
+// 	img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
+
+	img_pg1[(i * 2) + 0] = l_val >> 8 & 0xff;
+	img_pg1[(i * 2) + 1] = img_pg1[(i * 2) + 0];
+	
+// 	img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
+// 	img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];	
+}
+printf("\n");
+
+// for (i = 0 ; i < FFT_BINS ; i++)			
+// {
+// 	//double wide
+// 	//bottom half
+// 	//printf("i: %d, l_bin: %d, rshifted: %d, val:%u\n", i, l_bins[i], (l_bins[i] >> 9), (1 << (l_bins[i] >> 9)));
+// 	l_max = (1 << (l_bins[i] >> 16)) - 1;
+// 	r_max = (1 << (r_bins[i] >> 16)) - 1;
+
+// 	img_pg0[(i * 4) + 0] = l_max & 0xff;
+// 	img_pg0[(i * 4) + 1] = img_pg0[(i * 4) + 0];
+	
+// 	img_pg0[(i * 4) + 2] = r_max & 0xff;
+// 	img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
+
+// 	img_pg1[(i * 4) + 0] = l_max >> 8 & 0xff;
+// 	img_pg1[(i * 4) + 1] = img_pg1[(i * 4) + 0];
+	
+// 	img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
+// 	img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];			
+
+// }
+ ssd1306_display_image(&oled_display, 4, 0, img_pg0, sizeof(img_pg0));		
+ ssd1306_display_image(&oled_display, 5, 0, img_pg1, sizeof(img_pg1));	
+
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
@@ -609,15 +955,23 @@ void vDisplayUpdate(void * pvParameters)
 	char disp_buff[24];	
 	char file_name_buff[MAX_CHARS];
 
+	//uint8_t img[8*16];
+
 	init_display(); //eventually move to display task
 
 	vTaskDelay(pdMS_TO_TICKS(3000));
 
+	ssd1306_clear_line(&oled_display, 4, false);
+	ssd1306_clear_line(&oled_display, 5, false);
+	ssd1306_clear_line(&oled_display, 6, false);
+	ssd1306_clear_line(&oled_display, 7, false);
+
+
 
 	while (1)
 	{
-
-		totalSeconds = (int)(total_samples / current_sample_rate);
+		if (current_sample_rate > 0)
+			totalSeconds = (int)(total_samples / current_sample_rate);
 		//printf("samples: %d, rate: %d, seconds %d\n", total_samples, current_sample_rate, (int)(total_samples / current_sample_rate));
 		minutes = totalSeconds / 60;
 		seconds = totalSeconds % 60;
@@ -670,17 +1024,122 @@ void vDisplayUpdate(void * pvParameters)
 		}
 		
 		ssd1306_display_text(&oled_display, 3, disp_buff, strlen(disp_buff), false);
-		ssd1306_display_text(&oled_display, 4, "<BT SINK NAME>", strlen("<BT SINK NAME>"), false);
+		// ssd1306_display_text(&oled_display, 4, "<BT SINK NAME>", strlen("<BT SINK NAME>"), false);
 
-		ssd1306_display_text(&oled_display, 5, "<DISPLAY MODE>", strlen("<DISPLAY MODE>"), false);
+		// ssd1306_display_text(&oled_display, 5, "<DISPLAY MODE>", strlen("<DISPLAY MODE>"), false);
 
-		ssd1306_display_text(&oled_display, 6, "<BATTERY?>", strlen("<BATTERY?>"), false);
+		// ssd1306_display_text(&oled_display, 6, "<BATTERY?>", strlen("<BATTERY?>"), false);
+
 
 
 		vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
 	}
 }
 
+
+
+void vFFT_FrontDisplay(void * pvParameters)
+{
+	int i, k, m = FFT_SAMPLE_SIZE / FFT_BINS;
+	short * buff;
+	short l_channel[FFT_SAMPLE_SIZE];
+	short r_channel[FFT_SAMPLE_SIZE];
+	short l_bins[FFT_BINS];
+	short r_bins[FFT_BINS];
+	short l_max;
+	short r_max;
+	uint8_t img_pg0[32];
+	uint8_t img_pg1[32];
+	// Create the FFT config structure
+	// fft_config_t *real_fft_plan = fft_init(FFT_SAMPLE_SIZE, FFT_REAL, FFT_FORWARD, NULL, NULL);
+
+	while(1)
+	{
+
+
+		if (playing)
+		{
+			k = total_samples;
+			buff = buff0;
+			if (buff_num)
+			{
+				buff = buff1;
+			} 
+
+			for (i = 0; i < FFT_SAMPLE_SIZE; i++)
+			{
+				l_channel[i] = buff[i * 2];
+				r_channel[i] = buff[(i * 2) + 1];
+			}
+
+			// fix_fftr(l_channel, FFT_SAMPLE_SIZE_POWER, 0);
+			// fix_fftr(r_channel, FFT_SAMPLE_SIZE_POWER, 0);
+
+//Binning
+			k = 0;
+			l_max = 0;
+			r_max = 0;
+
+			for(i = 0; i < FFT_SAMPLE_SIZE; i++)
+			{
+				if ((i % m) == (m - 1))
+				{
+					//printf("setting max at %d\n", i);
+					l_bins[k] = l_max;
+					r_bins[k] = r_max;
+
+					l_max = 0;
+					r_max = 0;
+
+					k++;
+				}
+
+				l_max = ((l_channel[i] > l_max) ? l_channel[i] : l_max);
+				r_max = ((r_channel[i] > r_max) ? r_channel[i] : r_max);
+				
+			}
+
+			
+
+			for (i = 0 ; i < FFT_BINS ; i++)			
+			{
+				//double wide
+				//bottom half
+				//printf("i: %d, l_bin: %d, rshifted: %d, val:%u\n", i, l_bins[i], (l_bins[i] >> 9), (1 << (l_bins[i] >> 9)));
+				l_max = (1 << (l_bins[i] >> 8)) - 1;
+				r_max = (1 << (r_bins[i] >> 8)) - 1;
+
+				img_pg0[(i * 4) + 0] = l_max & 0xff;
+				img_pg0[(i * 4) + 1] = img_pg0[(i * 4) + 0];
+				
+				img_pg0[(i * 4) + 2] = r_max & 0xff;
+				img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
+
+				img_pg1[(i * 4) + 0] = l_max >> 8 & 0xff;
+				img_pg1[(i * 4) + 1] = img_pg1[(i * 4) + 0];
+				
+				img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
+				img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];
+
+				//top half
+				// img_pg1[(i * 4) + 0] = l_bins[i] >> 8 & 0xff;
+				// img_pg1[(i * 4) + 1] = l_bins[i] >> 8 & 0xff;
+				
+				// img_pg1[(i * 4) + 2] = r_bins[i] >> 8 & 0xff;
+				// img_pg1[(i * 4) + 3] = r_bins[i] >> 8 & 0xff;				
+		
+			}
+			ssd1306_display_image(&oled_display, 4, 0, img_pg0, sizeof(img_pg0));		
+			ssd1306_display_image(&oled_display, 5, 0, img_pg1, sizeof(img_pg1));		
+//				printf("bin %d : l=%d, r=%d\n", i, l_bins[i], r_bins[i]);
+
+
+
+		}
+		
+			vTaskDelay(pdMS_TO_TICKS(50));
+	}
+}
 
 extern "C" void app_main(void)
 {
@@ -693,6 +1152,8 @@ extern "C" void app_main(void)
 
 	//i2s_output = true;
 
+	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
+
 	SDCard* sdc = new SDCard();
 	sdc->init();
 
@@ -700,11 +1161,11 @@ extern "C" void app_main(void)
 
 
 
-	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
+
 	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
-
+	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
 
 	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
 	

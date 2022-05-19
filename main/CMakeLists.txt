@@ -1,5 +1,7 @@
 idf_component_register(
-    SRCS 
+    SRCS
+        "kiss_fft.cpp"
+        "kiss_fftr.cpp"
         "ssd1306_i2c.cpp"
         "ssd1306_spi.cpp" 
         "ssd1306.cpp"

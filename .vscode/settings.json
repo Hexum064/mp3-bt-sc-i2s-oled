@@ -51,7 +51,8 @@
         "future": "cpp",
         "esp_a2dp_api.h": "c",
         "btc_av_api.h": "c",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "cmath": "cpp"
     },
     "idf.flashType": "UART",
     "cSpell.words": [
