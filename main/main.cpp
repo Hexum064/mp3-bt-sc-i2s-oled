@@ -13,10 +13,9 @@
 #include <driver/gpio.h>
 #include "I2SOutput.h"
 #include "ssd1306_i2c.h"
-
-	#include "kiss_fft.h"
-	#include "kiss_fftr.h"
-
+#include "kiss_fft.h"
+#include "kiss_fftr.h"
+#include "ws2812.h"
 #include <math.h>
 
 extern "C" {
@@ -41,7 +40,11 @@ extern "C" {
 #define DISPLAY_SCL GPIO_NUM_22
 #define DISPLAY_RST GPIO_NUM_NC
 
+#define FRONT_DISPLAY_PIN GPIO_NUM_11
+
 #define OLED_DISP_INT 250
+
+#define RGB_LED_COUNT 536
 
 #define SHORT_BUTTON_PUSH 50000ULL
 #define LONG_BUTTON_HOLD 750000ULL
@@ -1141,6 +1144,45 @@ void vFFT_FrontDisplay(void * pvParameters)
 	}
 }
 
+
+void vFrontSideDisplay(void * pvParameters)
+{
+	//Using this as a test for now
+	WS2812* ws2812 = new WS2812(FRONT_DISPLAY_PIN, RGB_LED_COUNT);
+	uint8_t red = 0;
+	uint8_t green = 0;
+	uint8_t blue = 0;
+
+	while (1)
+	{
+		red += 16;
+		if (red >= 128)
+		{
+			red = 0;
+			green += 16;
+
+			if (green >= 128)
+			{
+				green = 0;
+				blue += 16;
+
+				if (blue >= 128)
+				{
+					blue = 0;
+				}
+			}
+		}
+
+		for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
+		{
+			ws2812->setPixel(i, red, green, blue);	
+		}
+		ws2812->show();
+
+		vTaskDelay(pdMS_TO_TICKS(50));
+	}
+}
+
 extern "C" void app_main(void)
 {
 	//FOR TESTING: address 42:fa:bf:75:ca:26, name Q50
@@ -1166,6 +1208,7 @@ extern "C" void app_main(void)
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
 	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
+	xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
 
 	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
 	

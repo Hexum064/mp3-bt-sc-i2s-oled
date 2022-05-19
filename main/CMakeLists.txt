@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "ws2812.cpp"
         "kiss_fft.cpp"
         "kiss_fftr.cpp"
         "ssd1306_i2c.cpp"
