@@ -1,340 +1,194 @@
-#include <esp_log.h>
-#include <driver/rmt.h>
+/* Created 19 Nov 2016 by Chris Osborn <fozztexx@fozztexx.com>
+ * http://insentricity.com
+ *
+ * Uses the RMT peripheral on the ESP32 for very accurate timing of
+ * signals sent to the WS2812 LEDs.
+ *
+ * This code is placed in the public domain (or CC0 licensed, at your option).
+ */
+
+#include "ws2812.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <soc/rmt_struct.h>
+#include <soc/dport_reg.h>
 #include <driver/gpio.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <soc/gpio_sig_map.h>
+#include <esp_intr.h>
 #include <string.h>
-#include <stdexcept>
+#include <stdio.h>
+#include <stdlib.h>
+#include <driver/rmt.h>
 
-#include "sdkconfig.h"
-#include "WS2812.h"
+#define ETS_RMT_CTRL_INUM	18
+#define ESP_RMT_CTRL_DISABLE	ESP_RMT_CTRL_DIABLE /* Typo in esp_intr.h */
 
-// #if CONFIG_CXX_EXCEPTIONS != 1
-// #error "C++ exception handling must be enabled within make menuconfig. See Compiler Options > Enable C++ Exceptions."
-// #endif
+#define DIVIDER		4 /* Above 4, timings start to deviate*/
+#define DURATION	12.5 /* minimum time of a single RMT duration
+				in nanoseconds based on clock */
 
+// #define PULSE_T0H	(  350 / (DURATION * DIVIDER));
+// #define PULSE_T1H	(  900 / (DURATION * DIVIDER));
+// #define PULSE_T0L	(  900 / (DURATION * DIVIDER));
+// #define PULSE_T1L	(  350 / (DURATION * DIVIDER));
 
-static const char* LOG_TAG = "WS2812";
+#define PULSE_T0H	(  300 / (DURATION * DIVIDER));
+#define PULSE_T1H	(  850 / (DURATION * DIVIDER));
+#define PULSE_T0L	(  850 / (DURATION * DIVIDER));
+#define PULSE_T1L	(  300 / (DURATION * DIVIDER));
+#define PULSE_TRS	(50000 / (DURATION * DIVIDER));
 
-/**
- * A NeoPixel is defined by 3 bytes ... red, green and blue.
- * Each byte is composed of 8 bits ... therefore a NeoPixel is 24 bits of data.
- * At the underlying level, 1 bit of NeoPixel data is one item (two levels)
- * This means that the number of items we need is:
- *
- * #pixels * 24
- *
- */
+#define MAX_PULSES	32
 
-/**
- * Set two levels of RMT output to the Neopixel value for a "1".
- * This is:
- * a logic 1 for 0.7us
- * a logic 0 for 0.6us
- */
-static void setItem1(rmt_item32_t* pItem) {
-	assert(pItem != nullptr);
-	pItem->level0    = 1;
-	pItem->duration0 = 10;
-	pItem->level1    = 0;
-	pItem->duration1 = 6;
-} // setItem1
+#define RMTCHANNEL	0
 
+typedef union {
+  struct {
+    uint32_t duration0:15;
+    uint32_t level0:1;
+    uint32_t duration1:15;
+    uint32_t level1:1;
+  };
+  uint32_t val;
+} rmtPulsePair;
 
+static uint8_t *ws2812_buffer = NULL;
+static unsigned int ws2812_pos, ws2812_len, ws2812_half;
+static xSemaphoreHandle ws2812_sem = NULL;
+static intr_handle_t rmt_intr_handle = NULL;
+static rmtPulsePair ws2812_bits[2];
 
-/**
- * Set two levels of RMT output to the Neopixel value for a "0".
- * This is:
- * a logic 1 for 0.35us
- * a logic 0 for 0.8us
- */
-static void setItem0(rmt_item32_t* pItem) {
-	assert(pItem != nullptr);
-	pItem->level0    = 1;
-	pItem->duration0 = 4;
-	pItem->level1    = 0;
-	pItem->duration1 = 8;
-} // setItem0
+void ws2812_initRMTChannel(int rmtChannel)
+{
+  RMT.apb_conf.fifo_mask = 1;  //enable memory access, instead of FIFO mode.
+  RMT.apb_conf.mem_tx_wrap_en = 1; //wrap around when hitting end of buffer
+  RMT.conf_ch[rmtChannel].conf0.div_cnt = DIVIDER;
+  RMT.conf_ch[rmtChannel].conf0.mem_size = 1;
+  RMT.conf_ch[rmtChannel].conf0.carrier_en = 0;
+  RMT.conf_ch[rmtChannel].conf0.carrier_out_lv = 1;
+  RMT.conf_ch[rmtChannel].conf0.mem_pd = 0;
 
+  RMT.conf_ch[rmtChannel].conf1.rx_en = 0;
+  RMT.conf_ch[rmtChannel].conf1.mem_owner = 0;
+  RMT.conf_ch[rmtChannel].conf1.tx_conti_mode = 0;    //loop back mode.
+  RMT.conf_ch[rmtChannel].conf1.ref_always_on = 1;    // use apb clock: 80M
+  RMT.conf_ch[rmtChannel].conf1.idle_out_en = 1;
+  RMT.conf_ch[rmtChannel].conf1.idle_out_lv = 0;
 
-/**
- * Add an RMT terminator into the RMT data.
- */
-static void setTerminator(rmt_item32_t* pItem) {
-	assert(pItem != nullptr);
-	pItem->level0    = 0;
-	pItem->duration0 = 0;
-	pItem->level1    = 0;
-	pItem->duration1 = 0;
-} // setTerminator
+  return;
+}
 
-/*
- * Internal function not exposed.  Get the pixel channel color from the channel
- * type which should be one of 'R', 'G' or 'B'.
- */
-static uint8_t getChannelValueByType(char type, pixel_t pixel) {
-	switch (type) {
-		case 'r':
-		case 'R':
-			return pixel.red;
-		case 'b':
-		case 'B':
-			return pixel.blue;
-		case 'g':
-		case 'G':
-			return pixel.green;
-		default:
-			ESP_LOGW(LOG_TAG, "Unknown color channel 0x%2x", type);
-			return 0;
-	}
-} // getChannelValueByType
+void ws2812_copy()
+{
+  unsigned int i, j, offset, len, bit;
 
 
-/**
- * @brief Construct a wrapper for the pixels.
- *
- * In order to drive the NeoPixels we need to supply some basic information.  This
- * includes the GPIO pin that is connected to the data-in (DIN) of the devices.
- * Since we also want to be able to drive a string of pixels, we need to tell the class
- * how many pixels are present in the string.
- *
+  offset = ws2812_half * MAX_PULSES;
+  ws2812_half = !ws2812_half;
 
- * @param [in] dinPin The GPIO pin used to drive the data.
- * @param [in] pixelCount The number of pixels in the strand.
- * @param [in] channel The RMT channel to use.  Defaults to RMT_CHANNEL_0.
- */
-WS2812::WS2812(gpio_num_t dinPin, uint16_t pixelCount, int channel) {
-	/*
-	if (pixelCount == 0) {
-		throw std::range_error("Pixel count was 0");
-	}
-	*/
-	//assert(ESP32CPP::GPIO::inRange(dinPin));
+  len = ws2812_len - ws2812_pos;
+  if (len > (MAX_PULSES / 8))
+    len = (MAX_PULSES / 8);
 
-	this->pixelCount = pixelCount;
-	this->channel    = (rmt_channel_t) channel;
+  if (!len) {
+    for (i = 0; i < MAX_PULSES; i++)
+      RMTMEM.chan[RMTCHANNEL].data32[i + offset].val = 0;
+    return;
+  }
 
-	// The number of items is number of pixels * 24 bits per pixel + the terminator.
-	// Remember that an item is TWO RMT output bits ... for NeoPixels this is correct because
-	// on Neopixel bit is TWO bits of output ... the high value and the low value
+  for (i = 0; i < len; i++) {
+    bit = ws2812_buffer[i + ws2812_pos];
+    for (j = 0; j < 8; j++, bit <<= 1) {
+      RMTMEM.chan[RMTCHANNEL].data32[j + i * 8 + offset].val =
+	ws2812_bits[(bit >> 7) & 0x01].val;
+    }
+    if (i + ws2812_pos == ws2812_len - 1)
+      RMTMEM.chan[RMTCHANNEL].data32[7 + i * 8 + offset].duration1 = PULSE_TRS;
+  }
 
-	this->items      = new rmt_item32_t[pixelCount * 24 + 1];
-	this->pixels     = new pixel_t[pixelCount];
-	this->colorOrder = (char*) "GRB";
-	clear();
+  for (i *= 8; i < MAX_PULSES; i++)
+    RMTMEM.chan[RMTCHANNEL].data32[i + offset].val = 0;
 
-	rmt_config_t config;
-	config.rmt_mode                  = RMT_MODE_TX;
-	config.channel                   = this->channel;
-	config.gpio_num                  = dinPin;
-	config.mem_block_num             = 8 - this->channel;
-	config.clk_div                   = 8;
-	config.tx_config.loop_en         = 0;
-	config.tx_config.carrier_en      = 0;
-	config.tx_config.idle_output_en  = 1;
-	config.tx_config.idle_level      = (rmt_idle_level_t) 0;
-	config.tx_config.carrier_freq_hz = 10000;
-	config.tx_config.carrier_level   = (rmt_carrier_level_t)1;
-	config.tx_config.carrier_duty_percent = 50;
+  ws2812_pos += len;
+  return;
+}
 
-rmt_config(&config);
-rmt_driver_install(this->channel, 0, 0);
-
-	// ESP_ERROR_CHECK(rmt_config(&config));
-	// ESP_ERROR_CHECK(rmt_driver_install(this->channel, 0, 0));
-} // WS2812
+void ws2812_handleInterrupt(void *arg)
+{
+  portBASE_TYPE taskAwoken = 0;
 
 
-/**
- * @brief Show the current Neopixel data.
- *
- * Drive the LEDs with the values that were previously set.
- */
-void WS2812::show() {
-	auto pCurrentItem = this->items;
+  if (RMT.int_st.ch0_tx_thr_event) {
+    ws2812_copy();
+    RMT.int_clr.ch0_tx_thr_event = 1;
+  }
+  else if (RMT.int_st.ch0_tx_end && ws2812_sem) {
+    xSemaphoreGiveFromISR(ws2812_sem, &taskAwoken);
+    RMT.int_clr.ch0_tx_end = 1;
+  }
 
-	for (uint16_t i = 0; i < this->pixelCount; i++) {
-		uint32_t currentPixel =
-				(getChannelValueByType(this->colorOrder[0], this->pixels[i]) << 16) |
-				(getChannelValueByType(this->colorOrder[1], this->pixels[i]) << 8)  |
-				(getChannelValueByType(this->colorOrder[2], this->pixels[i]));
+  return;
+}
 
-		ESP_LOGD(LOG_TAG, "Pixel value: %x", currentPixel);
-		for (int8_t j = 23; j >= 0; j--) {
-			// We have 24 bits of data representing the red, green amd blue channels. The value of the
-			// 24 bits to output is in the variable current_pixel.  We now need to stream this value
-			// through RMT in most significant bit first.  To do this, we iterate through each of the 24
-			// bits from MSB to LSB.
-			if (currentPixel & (1 << j)) {
-				setItem1(pCurrentItem);
-			} else {
-				setItem0(pCurrentItem);
-			}
-			pCurrentItem++;
-		}
-	}
-	setTerminator(pCurrentItem); // Write the RMT terminator.
+void ws2812_init(int gpioNum)
+{
+  DPORT_SET_PERI_REG_MASK(DPORT_PERIP_CLK_EN_REG, DPORT_RMT_CLK_EN);
+  DPORT_CLEAR_PERI_REG_MASK(DPORT_PERIP_RST_EN_REG, DPORT_RMT_RST);
 
-	// Show the pixels.
-    rmt_write_items(this->channel, this->items, this->pixelCount * 24, 1 /* wait till done */);
-	//ESP_ERROR_CHECK(rmt_write_items(this->channel, this->items, this->pixelCount * 24, 1 /* wait till done */));
-} // show
+  rmt_set_pin((rmt_channel_t)RMTCHANNEL, RMT_MODE_TX, (gpio_num_t)gpioNum);
 
+  ws2812_initRMTChannel(RMTCHANNEL);
 
-/**
- * @brief Set the color order of data sent to the LEDs.
- *
- * Data is sent to the WS2812s in a serial fashion.  There are 8 bits of data for each of the three
- * channel colors (red, green and blue).  The WS2812 LEDs typically expect the data to arrive in the
- * order of "green" then "red" then "blue".  However, this has been found to vary between some
- * models and manufacturers.  What this means is that some want "red", "green", "blue" and still others
- * have their own orders.  This function can be called to override the default ordering of "GRB".
- * We can specify
- * an alternate order by supply an alternate three character string made up of 'R', 'G' and 'B'
- * for example "RGB".
- */
-void WS2812::setColorOrder(char* colorOrder) {
-	if (colorOrder != nullptr && strlen(colorOrder) == 3) {
-		this->colorOrder = colorOrder;
-	}
-} // setColorOrder
+  RMT.tx_lim_ch[RMTCHANNEL].limit = MAX_PULSES;
+  RMT.int_ena.ch0_tx_thr_event = 1;
+  RMT.int_ena.ch0_tx_end = 1;
+
+  ws2812_bits[0].level0 = 1;
+  ws2812_bits[0].level1 = 0;
+  ws2812_bits[0].duration0 = PULSE_T0H;
+  ws2812_bits[0].duration1 = PULSE_T0L;
+  ws2812_bits[1].level0 = 1;
+  ws2812_bits[1].level1 = 0;
+  ws2812_bits[1].duration0 = PULSE_T1H;
+  ws2812_bits[1].duration1 = PULSE_T1L;
+
+  esp_intr_alloc(ETS_RMT_INTR_SOURCE, 0, ws2812_handleInterrupt, NULL, &rmt_intr_handle);
+
+  return;
+}
+
+void ws2812_setColors(unsigned int length, rgbVal *array)
+{
+  unsigned int i;
 
 
-/**
- * @brief Set the given pixel to the specified color.
- *
- * The LEDs are not actually updated until a call to show().
- *
- * @param [in] index The pixel that is to have its color set.
- * @param [in] red The amount of red in the pixel.
- * @param [in] green The amount of green in the pixel.
- * @param [in] blue The amount of blue in the pixel.
- */
-void WS2812::setPixel(uint16_t index, uint8_t red, uint8_t green, uint8_t blue) {
-	assert(index < pixelCount);
-	this->pixels[index].red   = red;
-	this->pixels[index].green = green;
-	this->pixels[index].blue  = blue;
-} // setPixel
+  ws2812_len = (length * 3) * sizeof(uint8_t);
+  ws2812_buffer = (uint8_t *)malloc(ws2812_len);
 
+  for (i = 0; i < length; i++) {
+    ws2812_buffer[0 + i * 3] = array[i].g;
+    ws2812_buffer[1 + i * 3] = array[i].r;
+    ws2812_buffer[2 + i * 3] = array[i].b;
+  }
 
-/**
- * @brief Set the given pixel to the specified color.
- *
- * The LEDs are not actually updated until a call to show().
- *
- * @param [in] index The pixel that is to have its color set.
- * @param [in] pixel The color value of the pixel.
- */
-void WS2812::setPixel(uint16_t index, pixel_t pixel) {
-	assert(index < pixelCount);
-	this->pixels[index] = pixel;
-} // setPixel
+  ws2812_pos = 0;
+  ws2812_half = 0;
 
+  ws2812_copy();
 
-/**
- * @brief Set the given pixel to the specified color.
- *
- * The LEDs are not actually updated until a call to show().
- *
- * @param [in] index The pixel that is to have its color set.
- * @param [in] pixel The color value of the pixel.
- */
-void WS2812::setPixel(uint16_t index, uint32_t pixel) {
-	assert(index < pixelCount);
-	this->pixels[index].red   = pixel & 0xff;
-	this->pixels[index].green = (pixel & 0xff00) >> 8;
-	this->pixels[index].blue  = (pixel & 0xff0000) >> 16;
-} // setPixel
+  if (ws2812_pos < ws2812_len)
+    ws2812_copy();
 
-/**
- * @brief Set the given pixel to the specified HSB color.
- *
- * The LEDs are not actually updated until a call to show().
- *
- * @param [in] index The pixel that is to have its color set.
- * @param [in] hue The amount of hue in the pixel (0-360).
- * @param [in] saturation The amount of saturation in the pixel (0-255).
- * @param [in] brightness The amount of brightness in the pixel (0-255).
- */
-void WS2812::setHSBPixel(uint16_t index, uint16_t hue, uint8_t saturation, uint8_t brightness) {
-	double sat_red;
-	double sat_green;
-	double sat_blue;
-	double ctmp_red;
-	double ctmp_green;
-	double ctmp_blue;
-	double new_red;
-	double new_green;
-	double new_blue;
-	double dSaturation = (double) saturation / 255;
-	double dBrightness = (double) brightness / 255;
+  ws2812_sem = xSemaphoreCreateBinary();
 
-	assert(index < pixelCount);
+  RMT.conf_ch[RMTCHANNEL].conf1.mem_rd_rst = 1;
+  RMT.conf_ch[RMTCHANNEL].conf1.tx_start = 1;
 
-	if (hue < 120) {
-		sat_red = (120 - hue) / 60.0;
-		sat_green = hue / 60.0;
-		sat_blue = 0;
-	} else if (hue < 240) {
-		sat_red = 0;
-		sat_green = (240 - hue) / 60.0;
-		sat_blue = (hue - 120) / 60.0;
-	} else {
-		sat_red = (hue - 240) / 60.0;
-		sat_green = 0;
-		sat_blue = (360 - hue) / 60.0;
-	}
+  xSemaphoreTake(ws2812_sem, portMAX_DELAY);
+  vSemaphoreDelete(ws2812_sem);
+  ws2812_sem = NULL;
 
-	if (sat_red > 1.0) {
-		sat_red = 1.0;
-	}
-	if (sat_green > 1.0) {
-		sat_green = 1.0;
-	}
-	if (sat_blue > 1.0) {
-		sat_blue = 1.0;
-	}
+  free(ws2812_buffer);
 
-	ctmp_red = 2 * dSaturation * sat_red + (1 - dSaturation);
-	ctmp_green = 2 * dSaturation * sat_green + (1 - dSaturation);
-	ctmp_blue = 2 * dSaturation * sat_blue + (1 - dSaturation);
-
-	if (dBrightness < 0.5) {
-		new_red = dBrightness * ctmp_red;
-		new_green = dBrightness * ctmp_green;
-		new_blue = dBrightness * ctmp_blue;
-	} else {
-		new_red = (1 - dBrightness) * ctmp_red + 2 * dBrightness - 1;
-		new_green = (1 - dBrightness) * ctmp_green + 2 * dBrightness - 1;
-		new_blue = (1 - dBrightness) * ctmp_blue + 2 * dBrightness - 1;
-	}
-
-	this->pixels[index].red   = (uint8_t)(new_red * 255);
-	this->pixels[index].green = (uint8_t)(new_green * 255);
-	this->pixels[index].blue  = (uint8_t)(new_blue * 255);
-} // setHSBPixel
-
-
-/**
- * @brief Clear all the pixel colors.
- *
- * This sets all the pixels to off which is no brightness for all of the color channels.
- * The LEDs are not actually updated until a call to show().
- */
-void WS2812::clear() {
-	for (uint16_t i = 0; i < this->pixelCount; i++) {
-		this->pixels[i].red   = 0;
-		this->pixels[i].green = 0;
-		this->pixels[i].blue  = 0;
-	}
-} // clear
-
-
-/**
- * @brief Class instance destructor.
- */
-WS2812::~WS2812() {
-	delete this->items;
-	delete this->pixels;
-} // ~WS2812()
+  return;
+}

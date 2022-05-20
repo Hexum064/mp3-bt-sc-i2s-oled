@@ -40,7 +40,7 @@ extern "C" {
 #define DISPLAY_SCL GPIO_NUM_22
 #define DISPLAY_RST GPIO_NUM_NC
 
-#define FRONT_DISPLAY_PIN GPIO_NUM_11
+#define FRONT_DISPLAY_PIN GPIO_NUM_27
 
 #define OLED_DISP_INT 250
 
@@ -175,68 +175,113 @@ uint32_t val = abs(real) + abs(imaginary);
 
 	if (val <= VAL_OFFSET)
 	{
-		return 0x01;
+		return 8;
 	}
 	else if (val <= VAL_OFFSET * 2)
 	{
-		return 0x03;
-	}
-	else if (val <= VAL_OFFSET * 3)
-	{
-		return 0x07;
+		return 7;
 	}
 	else if (val <= VAL_OFFSET * 4)
 	{
-		return 0x0F;
-	}
-	else if (val <= VAL_OFFSET * 5)
-	{
-		return 0x1F;
+		return 6;
 	}
 	else if (val <= VAL_OFFSET * 6)
 	{
-		return 0x3F;	
-	}
-	else if (val <= VAL_OFFSET * 7)
-	{
-		return 0x7F;
+		return 5;
 	}
 	else if (val <= VAL_OFFSET * 8)
 	{
-		return 0xFF;
-	}
-	else if (val <= VAL_OFFSET * 9)
-	{
-		return 0x1FF;
+		return 4;
 	}
 	else if (val <= VAL_OFFSET * 10)
 	{
-		return 0x3FF;
-	}
-	else if (val <= VAL_OFFSET * 1)
-	{
-		return 0x7FF;
+		return 3;
 	}
 	else if (val <= VAL_OFFSET * 12)
 	{
-		return 0xFFF;
-	}
-	else if (val <= VAL_OFFSET * 13)
-	{
-		return 0x1FFF;
+		return 2;
 	}
 	else if (val <= VAL_OFFSET * 14)
 	{
-		return 0x3FFF;
-	}
-	else if (val <= VAL_OFFSET * 15)
-	{
-		return 0x7FFF;
-	}
+		return 1;
+	} 
 	else
 	{
-		return 0xFFFF;
-	}											
+		return 0;
+	}
+
+	// if (val <= VAL_OFFSET)
+	// {
+	// 	//return 0x01;
+	// 	return 1;
+	// }
+	// else if (val <= VAL_OFFSET * 2)
+	// {
+	// 	//return 0x03;
+	// 	return 2;
+	// }
+	// else if (val <= VAL_OFFSET * 3)
+	// {
+	// 	// return 0x07;
+	// 	return 3;
+	// }
+	// else if (val <= VAL_OFFSET * 4)
+	// {
+	// 	// return 0x0F;
+	// 	return 4;
+	// }
+	// else if (val <= VAL_OFFSET * 5)
+	// {
+	// 	// return 0x1F;
+	// 	return 5;
+	// }
+	// else if (val <= VAL_OFFSET * 6)
+	// {
+	// 	// return 0x3F;	
+	// 	return 6;
+	// }
+	// else if (val <= VAL_OFFSET * 7)
+	// {
+	// 	// return 0x7F;
+	// 	return 7;
+	// }
+	// else if (val <= VAL_OFFSET * 8)
+	// {
+	// 	// return 0xFF;
+	// 	return 8;
+	// }
+	// else if (val <= VAL_OFFSET * 9)
+	// {
+	// 	return 0x1FF;
+	// }
+	// else if (val <= VAL_OFFSET * 10)
+	// {
+	// 	return 0x3FF;
+	// }
+	// else if (val <= VAL_OFFSET * 1)
+	// {
+	// 	return 0x7FF;
+	// }
+	// else if (val <= VAL_OFFSET * 12)
+	// {
+	// 	return 0xFFF;
+	// }
+	// else if (val <= VAL_OFFSET * 13)
+	// {
+	// 	return 0x1FFF;
+	// }
+	// else if (val <= VAL_OFFSET * 14)
+	// {
+	// 	return 0x3FFF;
+	// }
+	// else if (val <= VAL_OFFSET * 15)
+	// {
+	// 	return 0x7FFF;
+	// }
+	// else
+	// {
+	// 	return 0xFFFF;
+	// }											
 }
 
 
@@ -631,30 +676,6 @@ void vMp3Decode( void * pvParameters )
 {
 
 
-int i, k, l = FFT_SAMPLE_SIZE >> 1, m = l / FFT_BINS;
-int16_t l_channel[FFT_SAMPLE_SIZE];
-int16_t r_channel[FFT_SAMPLE_SIZE];
-uint32_t l_bins[FFT_BINS];
-uint32_t r_bins[FFT_BINS];
-short l_max;
-short r_max;
-int l_max_i = 0;
-int r_max_i = 0;
-uint8_t img_pg0[32];
-uint8_t img_pg1[32];
-
-int32_t l_bins_r[FFT_BINS];
-int32_t r_bins_r[FFT_BINS];
-int32_t l_bins_i[FFT_BINS];
-int32_t r_bins_i[FFT_BINS];
-
-int nfft = FFT_SAMPLE_SIZE ;
-// the various buffers  
-//int16_t* samples = (int16_t*) calloc(nfft, sizeof(int16_t));
-kiss_fft_cpx* spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
-// int16_t* resampled = (int16_t*) calloc(nfft, sizeof(int16_t));
-kiss_fftr_cfg st = kiss_fftr_alloc(nfft, 0, NULL, NULL);
-
 	uint16_t sample_rate = 0;
 	uint32_t sample_count = 0;
 	FileNavi::goto_first_mp3();
@@ -769,162 +790,6 @@ kiss_fftr_cfg st = kiss_fftr_alloc(nfft, 0, NULL, NULL);
 				}
 				
 			}
-
-
-k = total_samples;
-
-for (i = 0; i < nfft; i++)
-{
-	l_channel[i] = fillBuff[i * 2];
-	r_channel[i] = fillBuff[(i * 2) + 1];
-}
-
-kiss_fftr(st, (kiss_fft_scalar*)l_channel, spectrum);
-
-// fix_fftr(l_channel, FFT_SAMPLE_SIZE_POWER, 0);
-// fix_fftr(r_channel, FFT_SAMPLE_SIZE_POWER, 0);
-
-//Binning
-k = 0;
-l = nfft >> 2;
-l_max = 0;
-r_max = 0;
-l_max_i = 0;
-r_max_i = 0;
-
-for (i = 0 ; i < FFT_BINS ; i++)			
-{
-	l_bins_r[i] = 0;
-	l_bins_i[i] = 0;
-}
-
-//First have are real numbers we will use for max
-for(i = 0; i < l; i++)
-{
-
-	//bins
-	if (i <= 3 * 2)
-	{		
-		l_bins_r[0] += spectrum[i].r;
-		l_bins_i[0] += spectrum[i].i;
-	}
-	else if (i <= 6 * 2)
-	{
-		l_bins_r[1] += spectrum[i].r;
-		l_bins_i[1] += spectrum[i].i;
-	}
-	else if (i <= 13 * 2)
-	{
-		l_bins_r[2] += spectrum[i].r;
-		l_bins_i[2] += spectrum[i].i;		
-	}
-	else if (i <= 27 * 2)
-	{
-		l_bins_r[3] += spectrum[i].r;
-		l_bins_i[3] += spectrum[i].i;		
-	}
-	else if (i <= 55 * 2)
-	{
-		l_bins_r[4] += spectrum[i].r;
-		l_bins_i[4] += spectrum[i].i;		
-	}
-	else if (i <= 112 * 2)
-	{
-		l_bins_r[5] += spectrum[i].r;
-		l_bins_i[5] += spectrum[i].i;		
-	}
-	else if (i <= 229 * 2)
-	{
-		l_bins_r[6] += spectrum[i].r;
-		l_bins_i[6] += spectrum[i].i;		
-	}
-	else 
-	{
-		l_bins_r[7] += spectrum[i].r;
-		l_bins_i[7] += spectrum[i].i;		
-	}
-	// if (i<=3 )           {l_bins[0]  += l_channel[i]; r_bins[0]  += r_channel[i];}
-	// if (i>3   && i<=6  ) {l_bins[1]  += l_channel[i]; r_bins[1]  += r_channel[i];}
-	// if (i>6   && i<=13 ) {l_bins[2]  += l_channel[i]; r_bins[2]  += r_channel[i];}
-	// if (i>13  && i<=27 ) {l_bins[3]  += l_channel[i]; r_bins[3]  += r_channel[i];}
-	// if (i>27  && i<=55 ) {l_bins[4]  += l_channel[i]; r_bins[4]  += r_channel[i];}
-	// if (i>55  && i<=112) {l_bins[5]  += l_channel[i]; r_bins[5]  += r_channel[i];}
-	// if (i>112 && i<=229) {l_bins[6]  += l_channel[i]; r_bins[6]  += r_channel[i];}
-	// if (i>229          ) {l_bins[7]  += l_channel[i]; r_bins[7]  += r_channel[i];}	
-
-	// if ((i % m) == (m - 1))
-	// {
-		
-	// 	l_bins[k] = sqrt((uint32_t)(l_channel[l_max_i] * l_channel[l_max_i]) + (uint32_t)(l_channel[l_max_i + l] * l_channel[l_max_i + l]));
-	// 	r_bins[k] = sqrt((uint32_t)(r_channel[r_max_i] * r_channel[r_max_i]) + (uint32_t)(r_channel[r_max_i + l] * r_channel[r_max_i + l]));
-	// 	//printf("setting max at %d, l=%d, r=%d, l=%d, r=%d\n", i, l_max_i, r_max_i, l_bins[k], r_bins[k]);
-	// 	l_max = 0;
-	// 	r_max = 0;
-
-	// 	k++;
-	// }
-
-	// if (l_channel[i] > l_max)
-	// {
-	// 	l_max = l_channel[i];
-	// 	l_max_i = i;
-	// }
-
-	// if (r_channel[i] > r_max)
-	// {
-	// 	r_max = r_channel[i];
-	// 	r_max_i = i;
-	// }	
-
-	// l_max = ((l_channel[i] > l_max) ? l_channel[i] : l_max);
-	// r_max = ((r_channel[i] > r_max) ? r_channel[i] : r_max);
-	
-}
-
-uint16_t l_val = 0;
-uint16_t r_val = 0;
-
-for (i = 0 ; i < FFT_BINS ; i++)			
-{
-	l_val = get_bar_mag(l_bins_r[i], l_bins_i[i]);
-	printf("Bin %d, val %d\n", i, l_val);
-	img_pg0[(i * 2) + 0] = l_val & 0xff;
-	img_pg0[(i * 2) + 1] = img_pg0[(i * 2) + 0];
-	
-// 	img_pg0[(i * 4) + 2] = r_max & 0xff;
-// 	img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
-
-	img_pg1[(i * 2) + 0] = l_val >> 8 & 0xff;
-	img_pg1[(i * 2) + 1] = img_pg1[(i * 2) + 0];
-	
-// 	img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
-// 	img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];	
-}
-printf("\n");
-
-// for (i = 0 ; i < FFT_BINS ; i++)			
-// {
-// 	//double wide
-// 	//bottom half
-// 	//printf("i: %d, l_bin: %d, rshifted: %d, val:%u\n", i, l_bins[i], (l_bins[i] >> 9), (1 << (l_bins[i] >> 9)));
-// 	l_max = (1 << (l_bins[i] >> 16)) - 1;
-// 	r_max = (1 << (r_bins[i] >> 16)) - 1;
-
-// 	img_pg0[(i * 4) + 0] = l_max & 0xff;
-// 	img_pg0[(i * 4) + 1] = img_pg0[(i * 4) + 0];
-	
-// 	img_pg0[(i * 4) + 2] = r_max & 0xff;
-// 	img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
-
-// 	img_pg1[(i * 4) + 0] = l_max >> 8 & 0xff;
-// 	img_pg1[(i * 4) + 1] = img_pg1[(i * 4) + 0];
-	
-// 	img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
-// 	img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];			
-
-// }
- ssd1306_display_image(&oled_display, 4, 0, img_pg0, sizeof(img_pg0));		
- ssd1306_display_image(&oled_display, 5, 0, img_pg1, sizeof(img_pg1));	
 
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
@@ -1043,104 +908,246 @@ void vDisplayUpdate(void * pvParameters)
 
 void vFFT_FrontDisplay(void * pvParameters)
 {
-	int i, k, m = FFT_SAMPLE_SIZE / FFT_BINS;
-	short * buff;
-	short l_channel[FFT_SAMPLE_SIZE];
-	short r_channel[FFT_SAMPLE_SIZE];
-	short l_bins[FFT_BINS];
-	short r_bins[FFT_BINS];
-	short l_max;
-	short r_max;
-	uint8_t img_pg0[32];
-	uint8_t img_pg1[32];
+	ws2812_init(FRONT_DISPLAY_PIN);
+	rgbVal pixels[RGB_LED_COUNT];
+	rgbVal pixel_colors[8];
+
+	pixel_colors[0].r = 37;
+	pixel_colors[0].g = 0;
+	pixel_colors[0].b = 32;
+
+	pixel_colors[1].r = 18;
+	pixel_colors[1].g = 0;
+	pixel_colors[1].b = 48;
+
+	pixel_colors[2].r = 0;
+	pixel_colors[2].g = 0;
+	pixel_colors[2].b = 64;
+
+	pixel_colors[3].r = 0;
+	pixel_colors[3].g = 24;
+	pixel_colors[3].b = 48;
+
+	pixel_colors[4].r = 0;
+	pixel_colors[4].g = 64;
+	pixel_colors[4].b = 0;
+
+	pixel_colors[5].r = 32;
+	pixel_colors[5].g = 32;
+	pixel_colors[5].b = 0;
+
+	pixel_colors[6].r = 64;
+	pixel_colors[6].g = 32;
+	pixel_colors[6].b = 0;
+
+	pixel_colors[7].r = 64;
+	pixel_colors[7].g = 0;
+	pixel_colors[7].b = 0;
+
+	uint8_t red = 0;
+	uint8_t green = 0;
+	uint8_t blue = 0;
+
+	int i;
+	uint8_t bin_i = 0;
+	uint8_t row = 0;	
+
+	int16_t l_channel[FFT_SAMPLE_SIZE];
+	int16_t r_channel[FFT_SAMPLE_SIZE];
+	uint32_t l_bins[FFT_BINS];
+	uint32_t r_bins[FFT_BINS];
+	uint16_t l_val = 0;
+	uint16_t r_val = 0;
+
+
+	int32_t l_bins_r[FFT_BINS];
+	int32_t r_bins_r[FFT_BINS];
+	int32_t l_bins_i[FFT_BINS];
+	int32_t r_bins_i[FFT_BINS];
+
+	kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
+	kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
+
+	// int nfft = FFT_SAMPLE_SIZE ;
+
+	short * buff = buff0;
+	// the various buffers  
+
+	// kiss_fft_cpx* l_spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
+	// kiss_fft_cpx* r_spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
+
+	kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
 	// Create the FFT config structure
-	// fft_config_t *real_fft_plan = fft_init(FFT_SAMPLE_SIZE, FFT_REAL, FFT_FORWARD, NULL, NULL);
+
 
 	while(1)
 	{
 
+	
+
+
+
 
 		if (playing)
 		{
-			k = total_samples;
-			buff = buff0;
 			if (buff_num)
 			{
 				buff = buff1;
 			} 
 
+			//printf("Generatting FFT\n");
 			for (i = 0; i < FFT_SAMPLE_SIZE; i++)
 			{
 				l_channel[i] = buff[i * 2];
 				r_channel[i] = buff[(i * 2) + 1];
 			}
 
-			// fix_fftr(l_channel, FFT_SAMPLE_SIZE_POWER, 0);
-			// fix_fftr(r_channel, FFT_SAMPLE_SIZE_POWER, 0);
+			kiss_fftr(st, l_channel, l_spectrum);
+			kiss_fftr(st, r_channel, r_spectrum);
 
-//Binning
-			k = 0;
-			l_max = 0;
-			r_max = 0;
+			//Binning
 
-			for(i = 0; i < FFT_SAMPLE_SIZE; i++)
-			{
-				if ((i % m) == (m - 1))
-				{
-					//printf("setting max at %d\n", i);
-					l_bins[k] = l_max;
-					r_bins[k] = r_max;
-
-					l_max = 0;
-					r_max = 0;
-
-					k++;
-				}
-
-				l_max = ((l_channel[i] > l_max) ? l_channel[i] : l_max);
-				r_max = ((r_channel[i] > r_max) ? r_channel[i] : r_max);
-				
-			}
-
-			
 
 			for (i = 0 ; i < FFT_BINS ; i++)			
 			{
-				//double wide
-				//bottom half
-				//printf("i: %d, l_bin: %d, rshifted: %d, val:%u\n", i, l_bins[i], (l_bins[i] >> 9), (1 << (l_bins[i] >> 9)));
-				l_max = (1 << (l_bins[i] >> 8)) - 1;
-				r_max = (1 << (r_bins[i] >> 8)) - 1;
-
-				img_pg0[(i * 4) + 0] = l_max & 0xff;
-				img_pg0[(i * 4) + 1] = img_pg0[(i * 4) + 0];
-				
-				img_pg0[(i * 4) + 2] = r_max & 0xff;
-				img_pg0[(i * 4) + 3] = img_pg0[(i * 4) + 2];
-
-				img_pg1[(i * 4) + 0] = l_max >> 8 & 0xff;
-				img_pg1[(i * 4) + 1] = img_pg1[(i * 4) + 0];
-				
-				img_pg1[(i * 4) + 2] = r_max >> 8 & 0xff;
-				img_pg1[(i * 4) + 3] = img_pg1[(i * 4) + 2];
-
-				//top half
-				// img_pg1[(i * 4) + 0] = l_bins[i] >> 8 & 0xff;
-				// img_pg1[(i * 4) + 1] = l_bins[i] >> 8 & 0xff;
-				
-				// img_pg1[(i * 4) + 2] = r_bins[i] >> 8 & 0xff;
-				// img_pg1[(i * 4) + 3] = r_bins[i] >> 8 & 0xff;				
-		
+				l_bins_r[i] = 0;
+				l_bins_i[i] = 0;
+				r_bins_r[i] = 0;
+				r_bins_i[i] = 0;
 			}
-			ssd1306_display_image(&oled_display, 4, 0, img_pg0, sizeof(img_pg0));		
-			ssd1306_display_image(&oled_display, 5, 0, img_pg1, sizeof(img_pg1));		
-//				printf("bin %d : l=%d, r=%d\n", i, l_bins[i], r_bins[i]);
+
+			//First have are real numbers we will use for max
+			for(i = 0; i < FFT_SAMPLE_SIZE >> 2; i++)
+			{
+
+				//bins
+				if (i <= 3 * 2)
+				{		
+					l_bins_r[0] += l_spectrum[i].r;
+					l_bins_i[0] += l_spectrum[i].i;
+					r_bins_r[0] += r_spectrum[i].r;
+					r_bins_i[0] += r_spectrum[i].i;
+				}
+				else if (i <= 6 * 2)
+				{
+					l_bins_r[1] += l_spectrum[i].r;
+					l_bins_i[1] += l_spectrum[i].i;
+					r_bins_r[1] += r_spectrum[i].r;
+					r_bins_i[1] += r_spectrum[i].i;					
+				}
+				else if (i <= 13 * 2)
+				{
+					l_bins_r[2] += l_spectrum[i].r;
+					l_bins_i[2] += l_spectrum[i].i;
+					r_bins_r[2] += r_spectrum[i].r;
+					r_bins_i[2] += r_spectrum[i].i;							
+				}
+				else if (i <= 27 * 2)
+				{
+					l_bins_r[3] += l_spectrum[i].r;
+					l_bins_i[3] += l_spectrum[i].i;
+					r_bins_r[3] += r_spectrum[i].r;
+					r_bins_i[3] += r_spectrum[i].i;							
+				}
+				else if (i <= 55 * 2)
+				{
+					l_bins_r[4] += l_spectrum[i].r;
+					l_bins_i[4] += l_spectrum[i].i;
+					r_bins_r[4] += r_spectrum[i].r;
+					r_bins_i[4] += r_spectrum[i].i;							
+				}
+				else if (i <= 112 * 2)
+				{
+					l_bins_r[5] += l_spectrum[i].r;
+					l_bins_i[5] += l_spectrum[i].i;
+					r_bins_r[5] += r_spectrum[i].r;
+					r_bins_i[5] += r_spectrum[i].i;							
+				}
+				else if (i <= 229 * 2)
+				{
+					l_bins_r[6] += l_spectrum[i].r;
+					l_bins_i[6] += l_spectrum[i].i;		
+					r_bins_r[6] += r_spectrum[i].r;
+					r_bins_i[6] += r_spectrum[i].i;					
+				}
+				else 
+				{
+					l_bins_r[7] += l_spectrum[i].r;
+					l_bins_i[7] += l_spectrum[i].i;
+					r_bins_r[7] += r_spectrum[i].r;
+					r_bins_i[7] += r_spectrum[i].i;							
+				}
+
+
+			}
+
+			for (i = 0; i < FFT_BINS; i++)
+			{
+				l_bins_r[i] = get_bar_mag(l_bins_r[i], l_bins_i[i]);
+				r_bins_r[i] = get_bar_mag(r_bins_r[i], r_bins_i[i]);
+			}
 
 
 
+			//printf("Drawing FFT\n");
+			//Draw the display
+			//this will normally be RGB_LED_COUNT but for now, it's just 81 for now and both halves are done at the same time
+			for (i = 0 ; i < 81 ; i++)			
+			{
+				bin_i = i % 9;
+				row = i / 9;
+				
+				pixels[i].r = 0;
+				pixels[i].g = 0;
+				pixels[i].b = 0;	
+
+				pixels[i + 81].r = 0;
+				pixels[i + 81].g = 0;
+				pixels[i + 81].b = 0;	
+
+				if (bin_i) 
+				{
+					if (row >= l_bins_r[bin_i - 1])
+					{
+						pixels[i].r = pixel_colors[bin_i - 1].r;
+						pixels[i].g = pixel_colors[bin_i - 1].g;
+						pixels[i].b = pixel_colors[bin_i - 1].b;	
+						
+					}				
+
+					if (row >= r_bins_r[bin_i - 1])
+					{
+						pixels[i + 81].r = pixel_colors[bin_i - 1].r;
+						pixels[i + 81].g = pixel_colors[bin_i - 1].g;
+						pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
+						
+					}					
+
+
+					// if (row >= r_bins_r[bin_i - 1])
+					// {
+					// 	pixels[bin_i + 81].r = 0;
+					// 	pixels[bin_i + 81].g = 0;
+					// 	pixels[bin_i + 81].b = 64;					
+					// }					
+					// else
+					// {
+					// 	pixels[bin_i + 81].r = 0;
+					// 	pixels[bin_i + 81].g = 0;
+					// 	pixels[bin_i + 81].b = 0;							
+					// }
+				}
+				
+			}
+
+
+
+
+			ws2812_setColors(162, pixels);
+		
 		}
 		
-			vTaskDelay(pdMS_TO_TICKS(50));
+		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
 
@@ -1148,25 +1155,26 @@ void vFFT_FrontDisplay(void * pvParameters)
 void vFrontSideDisplay(void * pvParameters)
 {
 	//Using this as a test for now
-	WS2812* ws2812 = new WS2812(FRONT_DISPLAY_PIN, RGB_LED_COUNT);
+	ws2812_init(FRONT_DISPLAY_PIN);
+	rgbVal pixels[RGB_LED_COUNT];
 	uint8_t red = 0;
 	uint8_t green = 0;
 	uint8_t blue = 0;
 
 	while (1)
 	{
-		red += 16;
-		if (red >= 128)
+		red += 4;
+		if (red >= 64)
 		{
 			red = 0;
-			green += 16;
+			green += 4;
 
-			if (green >= 128)
+			if (green >= 64)
 			{
 				green = 0;
-				blue += 16;
+				blue += 4;
 
-				if (blue >= 128)
+				if (blue >= 64)
 				{
 					blue = 0;
 				}
@@ -1175,9 +1183,13 @@ void vFrontSideDisplay(void * pvParameters)
 
 		for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
 		{
-			ws2812->setPixel(i, red, green, blue);	
+			
+			pixels[i].r = red;
+			pixels[i].g = green;
+			pixels[i].b = blue;
+
 		}
-		ws2812->show();
+		ws2812_setColors(RGB_LED_COUNT, pixels);
 
 		vTaskDelay(pdMS_TO_TICKS(50));
 	}
@@ -1207,16 +1219,16 @@ extern "C" void app_main(void)
 	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
-	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
-	xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
+	xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
+	//xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
 
 	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
 	
 	BT_a2db bt(bt_app_a2d_data_cb);
 	bt_control = &bt;
-	bt.connect_bluetooth(addr);
+	//bt.connect_bluetooth(addr);
 
-	//bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
+	bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
 
 	
 }
