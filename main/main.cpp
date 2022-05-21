@@ -671,10 +671,208 @@ void vButtonInput( void * pvParameters )
 }
 
 
+void init_colors(rgbVal * pixel_colors)
+{
+	pixel_colors[0].r = 37;
+	pixel_colors[0].g = 0;
+	pixel_colors[0].b = 32;
+
+	pixel_colors[1].r = 18;
+	pixel_colors[1].g = 0;
+	pixel_colors[1].b = 48;
+
+	pixel_colors[2].r = 0;
+	pixel_colors[2].g = 0;
+	pixel_colors[2].b = 64;
+
+	pixel_colors[3].r = 0;
+	pixel_colors[3].g = 24;
+	pixel_colors[3].b = 48;
+
+	pixel_colors[4].r = 0;
+	pixel_colors[4].g = 64;
+	pixel_colors[4].b = 0;
+
+	pixel_colors[5].r = 32;
+	pixel_colors[5].g = 32;
+	pixel_colors[5].b = 0;
+
+	pixel_colors[6].r = 64;
+	pixel_colors[6].g = 32;
+	pixel_colors[6].b = 0;
+
+	pixel_colors[7].r = 64;
+	pixel_colors[7].g = 0;
+	pixel_colors[7].b = 0;
+}
+
+void display_fft(short * buff, rgbVal * pixel_colors)
+{
+	static int i;
+	static uint8_t bin_i = 0;
+	static uint8_t row = 0;	
+
+	static int16_t l_channel[FFT_SAMPLE_SIZE];
+	static int16_t r_channel[FFT_SAMPLE_SIZE];
+	static uint32_t l_bins[FFT_BINS];
+	static uint32_t r_bins[FFT_BINS];
+	static uint16_t l_val = 0;
+	static uint16_t r_val = 0;
+
+
+	static int32_t l_bins_r[FFT_BINS];
+	static int32_t r_bins_r[FFT_BINS];
+	static int32_t l_bins_i[FFT_BINS];
+	static int32_t r_bins_i[FFT_BINS];
+
+	static kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
+	static kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
+	static kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
+
+	static rgbVal pixels[RGB_LED_COUNT];
+
+//printf("Generatting FFT\n");
+	for (i = 0; i < FFT_SAMPLE_SIZE; i++)
+	{
+		l_channel[i] = buff[i * 2];
+		r_channel[i] = buff[(i * 2) + 1];
+	}
+
+	kiss_fftr(st, l_channel, l_spectrum);
+	kiss_fftr(st, r_channel, r_spectrum);
+
+	//Binning
+
+
+	for (i = 0 ; i < FFT_BINS ; i++)			
+	{
+		l_bins_r[i] = 0;
+		l_bins_i[i] = 0;
+		r_bins_r[i] = 0;
+		r_bins_i[i] = 0;
+	}
+
+	//First have are real numbers we will use for max
+	for(i = 0; i < FFT_SAMPLE_SIZE >> 2; i++)
+	{
+
+		//bins
+		if (i <= 3 * 2)
+		{		
+			l_bins_r[0] += l_spectrum[i].r;
+			l_bins_i[0] += l_spectrum[i].i;
+			r_bins_r[0] += r_spectrum[i].r;
+			r_bins_i[0] += r_spectrum[i].i;
+		}
+		else if (i <= 6 * 2)
+		{
+			l_bins_r[1] += l_spectrum[i].r;
+			l_bins_i[1] += l_spectrum[i].i;
+			r_bins_r[1] += r_spectrum[i].r;
+			r_bins_i[1] += r_spectrum[i].i;					
+		}
+		else if (i <= 13 * 2)
+		{
+			l_bins_r[2] += l_spectrum[i].r;
+			l_bins_i[2] += l_spectrum[i].i;
+			r_bins_r[2] += r_spectrum[i].r;
+			r_bins_i[2] += r_spectrum[i].i;							
+		}
+		else if (i <= 27 * 2)
+		{
+			l_bins_r[3] += l_spectrum[i].r;
+			l_bins_i[3] += l_spectrum[i].i;
+			r_bins_r[3] += r_spectrum[i].r;
+			r_bins_i[3] += r_spectrum[i].i;							
+		}
+		else if (i <= 55 * 2)
+		{
+			l_bins_r[4] += l_spectrum[i].r;
+			l_bins_i[4] += l_spectrum[i].i;
+			r_bins_r[4] += r_spectrum[i].r;
+			r_bins_i[4] += r_spectrum[i].i;							
+		}
+		else if (i <= 112 * 2)
+		{
+			l_bins_r[5] += l_spectrum[i].r;
+			l_bins_i[5] += l_spectrum[i].i;
+			r_bins_r[5] += r_spectrum[i].r;
+			r_bins_i[5] += r_spectrum[i].i;							
+		}
+		else if (i <= 229 * 2)
+		{
+			l_bins_r[6] += l_spectrum[i].r;
+			l_bins_i[6] += l_spectrum[i].i;		
+			r_bins_r[6] += r_spectrum[i].r;
+			r_bins_i[6] += r_spectrum[i].i;					
+		}
+		else 
+		{
+			l_bins_r[7] += l_spectrum[i].r;
+			l_bins_i[7] += l_spectrum[i].i;
+			r_bins_r[7] += r_spectrum[i].r;
+			r_bins_i[7] += r_spectrum[i].i;							
+		}
+
+
+	}
+
+	for (i = 0; i < FFT_BINS; i++)
+	{
+		l_bins_r[i] = get_bar_mag(l_bins_r[i], l_bins_i[i]);
+		r_bins_r[i] = get_bar_mag(r_bins_r[i], r_bins_i[i]);
+	}
+
+
+
+	//printf("Drawing FFT\n");
+	//Draw the display
+	//this will normally be RGB_LED_COUNT but for now, it's just 81 for now and both halves are done at the same time
+	for (i = 0 ; i < 81 ; i++)			
+	{
+		bin_i = i % 9;
+		row = i / 9;
+		
+		pixels[i].r = 0;
+		pixels[i].g = 0;
+		pixels[i].b = 0;	
+
+		pixels[i + 81].r = 0;
+		pixels[i + 81].g = 0;
+		pixels[i + 81].b = 0;	
+
+		if (bin_i) 
+		{
+			if (row >= l_bins_r[bin_i - 1])
+			{
+				pixels[i].r = pixel_colors[bin_i - 1].r;
+				pixels[i].g = pixel_colors[bin_i - 1].g;
+				pixels[i].b = pixel_colors[bin_i - 1].b;	
+				
+			}				
+
+			if (row >= r_bins_r[bin_i - 1])
+			{
+				pixels[i + 81].r = pixel_colors[bin_i - 1].r;
+				pixels[i + 81].g = pixel_colors[bin_i - 1].g;
+				pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
+				
+			}					
+
+		}
+		
+	}
+
+	ws2812_setColors(162, pixels);
+}
 
 void vMp3Decode( void * pvParameters )
 {
 
+ws2812_init(FRONT_DISPLAY_PIN);
+
+rgbVal pixel_colors[8];
+init_colors(pixel_colors);
 
 	uint16_t sample_rate = 0;
 	uint32_t sample_count = 0;
@@ -758,6 +956,12 @@ void vMp3Decode( void * pvParameters )
 
 			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
 			total_samples += sample_len;
+
+			if (sample_len > 0)
+			{
+				//display_fft(fillBuff, pixel_colors);
+			}
+
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
 
@@ -912,41 +1116,9 @@ void vFFT_FrontDisplay(void * pvParameters)
 	rgbVal pixels[RGB_LED_COUNT];
 	rgbVal pixel_colors[8];
 
-	pixel_colors[0].r = 37;
-	pixel_colors[0].g = 0;
-	pixel_colors[0].b = 32;
+	init_colors(pixel_colors);
 
-	pixel_colors[1].r = 18;
-	pixel_colors[1].g = 0;
-	pixel_colors[1].b = 48;
 
-	pixel_colors[2].r = 0;
-	pixel_colors[2].g = 0;
-	pixel_colors[2].b = 64;
-
-	pixel_colors[3].r = 0;
-	pixel_colors[3].g = 24;
-	pixel_colors[3].b = 48;
-
-	pixel_colors[4].r = 0;
-	pixel_colors[4].g = 64;
-	pixel_colors[4].b = 0;
-
-	pixel_colors[5].r = 32;
-	pixel_colors[5].g = 32;
-	pixel_colors[5].b = 0;
-
-	pixel_colors[6].r = 64;
-	pixel_colors[6].g = 32;
-	pixel_colors[6].b = 0;
-
-	pixel_colors[7].r = 64;
-	pixel_colors[7].g = 0;
-	pixel_colors[7].b = 0;
-
-	uint8_t red = 0;
-	uint8_t green = 0;
-	uint8_t blue = 0;
 
 	int i;
 	uint8_t bin_i = 0;
@@ -1206,7 +1378,7 @@ extern "C" void app_main(void)
 
 	//i2s_output = true;
 
-	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
+
 
 	SDCard* sdc = new SDCard();
 	sdc->init();
@@ -1215,20 +1387,20 @@ extern "C" void app_main(void)
 
 
 
-
+	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
-	xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
+	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
 	//xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
 
 	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
 	
 	BT_a2db bt(bt_app_a2d_data_cb);
 	bt_control = &bt;
-	//bt.connect_bluetooth(addr);
+	bt.connect_bluetooth(addr);
 
-	bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
+	//bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
 
 	
 }
