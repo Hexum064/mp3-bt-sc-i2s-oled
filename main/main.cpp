@@ -72,12 +72,14 @@ short buff0[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 short buff1[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 uint8_t buff_num = 0;
 float output_volume = MAX_VOL / 2;
+float prev_volume;
 bool playing = false;
 bool i2s_output = false;
 bool bt_enabled = true;
 bool bt_discovery_mode = false;
 bool has_started = false;
 bool f_change_file = false;
+bool f_muted = false;
 Output *output = NULL;
 int buff_pos = 0;
 i2s_pin_config_t i2s_speaker_pins;
@@ -86,7 +88,7 @@ uint16_t current_sample_rate = 0;
 uint64_t mp3_run_time = 0;
 char * full_path;
 uint16_t full_path_len = 0;
-
+rgbVal pixel_colors[8];
 BT_a2db *bt_control;
 SSD1306_t oled_display;
 
@@ -402,10 +404,12 @@ void play_next_song()
 
 	ESP_LOGI("main", "Going to next file.");
 	FileNavi::goto_next_mp3();
+	//For display
 	full_path = FileNavi::get_current_full_name();
 	full_path_len = strlen(full_path);
+	//end for display	
 	f_change_file = true;
-	vTaskResume(mp3TaskHandle);	
+
 }
 
 void play_previous_song()
@@ -417,12 +421,14 @@ void play_previous_song()
 	}
 
 	ESP_LOGI("main", "Going to previous file.");
-	//if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
+	//TODO: if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
 	FileNavi::goto_prev_mp3();
+	//For display
 	full_path = FileNavi::get_current_full_name();
 	full_path_len = strlen(full_path);
+	//end for display	
 	f_change_file = true;
-	//vTaskResume(mp3TaskHandle);	
+
 }
 
 void cycle_display()
@@ -479,7 +485,7 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	for (int i = 0; i < shortLen; i++ )
 	{
 			val = buff[buff_pos + i] + 0x7fff;
-			val *= (output_volume / MAX_VOL) / 2;
+			val *= f_muted ? 0 : (output_volume / MAX_VOL) / 2;
 			data[(i << 1)] = val & 0xff;
 			data[(i << 1) + 1] = (val >> 8) & 0xff;	
 	}
@@ -532,12 +538,8 @@ void vI2SOutput( void * pvParameters )
 			//ESP_LOGI("main", "Triggering next task");
 			vTaskResume(mp3TaskHandle);	
 
-			if (f_change_file)
-			{
-				continue;
-			}
 			//ESP_LOGI("main", "Outputting I2S");
-			output->set_volume(output_volume / MAX_VOL);
+			output->set_volume(f_muted ? 0 : output_volume / MAX_VOL);
 			output->write(buff, MINIMP3_MAX_SAMPLES_PER_FRAME);
 
 			if (buff_num)
@@ -706,7 +708,7 @@ void init_colors(rgbVal * pixel_colors)
 	pixel_colors[7].b = 0;
 }
 
-void display_fft(short * buff, rgbVal * pixel_colors)
+void display_fft(short * buff)
 {
 	static int i;
 	static uint8_t bin_i = 0;
@@ -869,16 +871,18 @@ void display_fft(short * buff, rgbVal * pixel_colors)
 void vMp3Decode( void * pvParameters )
 {
 
-ws2812_init(FRONT_DISPLAY_PIN);
 
-rgbVal pixel_colors[8];
-init_colors(pixel_colors);
+
+
 
 	uint16_t sample_rate = 0;
 	uint32_t sample_count = 0;
+	int sample_len = 0;
+	short * fillBuff;
+
 	FileNavi::goto_first_mp3();
-	full_path = FileNavi::get_current_full_name();
-	full_path_len = strlen(full_path);
+
+
 
 	ESP_LOGI("main", "starting mp3 decode task");
 	
@@ -886,19 +890,18 @@ init_colors(pixel_colors);
 
 	while (1)
 	{
-		has_started = false;
-		
-		int sample_len = 0;
 
-		short * fillBuff;
-
-		player = new MP3Player(FileNavi::get_current_full_name());
-		
-		//ESP_LOGI("main", "starting decode.");
 		f_change_file = false;
+		has_started = false;
 
-		//for( ;; )
-		while(!f_change_file)
+
+		printf("loading file %s\n", FileNavi::get_current_full_name());
+		vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
+		player = new MP3Player(FileNavi::get_current_full_name());
+
+
+
+		while(1)
 		{
 
 
@@ -909,7 +912,7 @@ init_colors(pixel_colors);
 				vTaskSuspend( mp3TaskHandle );
 			}
 
-			
+
 
 			fillBuff = buff1;
 
@@ -918,19 +921,28 @@ init_colors(pixel_colors);
 				fillBuff = buff0;
 			}
 
+			if (f_change_file)
+			{
+				f_muted = true; //just to avoid the skipping sound when changing songs.				
+				printf("Changing file\n");
+				// vTaskDelay(pdMS_TO_TICKS(100));	
+				break;
+			}
 
-			//ESP_LOGI("main", "decoding samples.");
+
+			
 			player->decodeSample(fillBuff, &sample_len);
 			total_samples += sample_len;
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
-
+	
 				total_samples = 0;
 				has_started = true;
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
 				current_sample_rate = player->info.hz;
+			
 				ESP_LOGI("main", "i2s output started");
 
 				if (sample_rate != current_sample_rate)
@@ -952,6 +964,7 @@ init_colors(pixel_colors);
 					}
 					
 				}
+				f_muted = false;
 			}
 
 			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
@@ -959,7 +972,7 @@ init_colors(pixel_colors);
 
 			if (sample_len > 0)
 			{
-				//display_fft(fillBuff, pixel_colors);
+				display_fft(fillBuff);
 			}
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
@@ -970,6 +983,7 @@ init_colors(pixel_colors);
 				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 				output->start(player->info.hz);
 				current_sample_rate = player->info.hz;
+				
 				ESP_LOGI("main", "i2s output started");
 
 
@@ -992,33 +1006,38 @@ init_colors(pixel_colors);
 					}
 					
 				}
-				
+				f_muted = false;
 			}
 
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
 			{
-
-				
-				f_change_file = true;
+		
+				ESP_LOGI("main", "Done with current song. Going to next file.");
 				FileNavi::goto_next_mp3();
-				has_started = false;
+				//For display
+				full_path = FileNavi::get_current_full_name();
+				full_path_len = strlen(full_path);
+				//end for display				
+				f_change_file = true;
 
 			}
 
 		}
 
 
-		output->stop();
 
-
+		// printf("Disposing player\n");
+		// vTaskDelay(pdMS_TO_TICKS(250));
 		player->dispose();
 		
 	}
+
+	printf("done with decode task\n");
 }
 
-void vDisplayUpdate(void * pvParameters)
+void vOLEDDisplayUpdate(void * pvParameters)
 {
 	int scroll_pos = 0;
 	int totalSeconds = 0;
@@ -1378,19 +1397,20 @@ extern "C" void app_main(void)
 
 	//i2s_output = true;
 
-
+	ws2812_init(FRONT_DISPLAY_PIN);
 
 	SDCard* sdc = new SDCard();
 	sdc->init();
 
 
+	init_colors(pixel_colors);
 
 
 
-	xTaskCreatePinnedToCore(vDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
-	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*32, NULL, 10, &mp3TaskHandle, 1);
+	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*24, NULL, 10, &mp3TaskHandle, 1);
 	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
 	//xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
 

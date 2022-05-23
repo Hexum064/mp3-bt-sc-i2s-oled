@@ -14,8 +14,9 @@
 
 FILE *fp;
 
-uint8_t *input_buf;
+
 int to_read = MP3_BUFFER_SIZE;
+uint8_t input_buf[MP3_BUFFER_SIZE];
 int buffered = 0;
 int decoded = 0;
 int bytes_read = 0;
@@ -34,23 +35,17 @@ MP3Player::MP3Player(const char *file)
         return;
     }
 
-    
-    input_buf = (uint8_t *)malloc(MP3_BUFFER_SIZE);
+    buffered = 0;
+    decoded = 0;
+    to_read = MP3_BUFFER_SIZE;
 
-    if (!pcm)
-    {
-        ESP_LOGE("MP3Player", "Failed to allocate pcm memory");
-        return;
-    }
-    if (!input_buf)
-    {
-        ESP_LOGE("MP3Player", "Failed to allocate input_buf memory");
-        return;
-    }
 }
 
 void MP3Player::dispose()
 {
+    
+ 
+    // free(input_buf);
     if (fp)
     {
         ESP_LOGI("MP3Player", "Closing file");
