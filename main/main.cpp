@@ -65,6 +65,8 @@ extern "C" {
 #define FFT_SAMPLE_SIZE (1 << FFT_SAMPLE_SIZE_POWER) 
 #define FFT_BINS 8
 
+#define SCROLL_HOLD 4
+
 TaskHandle_t mp3TaskHandle = NULL;
 
 
@@ -92,13 +94,21 @@ rgbVal pixel_colors[8];
 BT_a2db *bt_control;
 SSD1306_t oled_display;
 
+	 kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
+	 kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
+	 kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
+
+	 int16_t l_channel[FFT_SAMPLE_SIZE];
+	 int16_t r_channel[FFT_SAMPLE_SIZE];
+	 rgbVal pixels[RGB_LED_COUNT];
+
 uint64_t max_v =0;
 #define VAL_OFFSET 1024
 
-uint16_t get_bar_mag(int64_t real, int64_t imaginary)
+inline uint16_t get_bar_mag(int64_t real, int64_t imaginary)
 {
 	// uint32_t val = (uint32_t)sqrt((real * real) + (imaginary * imaginary));
-uint32_t val = abs(real) + abs(imaginary);
+	uint32_t val = abs(real) + abs(imaginary);
 
 	// if (val > max_v)
 	// {
@@ -561,8 +571,6 @@ void vI2SOutput( void * pvParameters )
 	}
 }
 
-
-
 void vButtonInput( void * pvParameters )
 {
 	uint8_t input = 0;
@@ -672,7 +680,6 @@ void vButtonInput( void * pvParameters )
 	}
 }
 
-
 void init_colors(rgbVal * pixel_colors)
 {
 	pixel_colors[0].r = 37;
@@ -685,7 +692,7 @@ void init_colors(rgbVal * pixel_colors)
 
 	pixel_colors[2].r = 0;
 	pixel_colors[2].g = 0;
-	pixel_colors[2].b = 64;
+	pixel_colors[2].b = 96;
 
 	pixel_colors[3].r = 0;
 	pixel_colors[3].g = 24;
@@ -714,8 +721,8 @@ void display_fft(short * buff)
 	static uint8_t bin_i = 0;
 	static uint8_t row = 0;	
 
-	static int16_t l_channel[FFT_SAMPLE_SIZE];
-	static int16_t r_channel[FFT_SAMPLE_SIZE];
+
+
 	static uint32_t l_bins[FFT_BINS];
 	static uint32_t r_bins[FFT_BINS];
 	static uint16_t l_val = 0;
@@ -727,11 +734,9 @@ void display_fft(short * buff)
 	static int32_t l_bins_i[FFT_BINS];
 	static int32_t r_bins_i[FFT_BINS];
 
-	static kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
-	static kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
-	static kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
 
-	static rgbVal pixels[RGB_LED_COUNT];
+
+	
 
 //printf("Generatting FFT\n");
 	for (i = 0; i < FFT_SAMPLE_SIZE; i++)
@@ -865,7 +870,7 @@ void display_fft(short * buff)
 		
 	}
 
-	ws2812_setColors(162, pixels);
+	ws2812_setColors(RGB_LED_COUNT, pixels);
 }
 
 void vMp3Decode( void * pvParameters )
@@ -881,7 +886,8 @@ void vMp3Decode( void * pvParameters )
 	short * fillBuff;
 
 	FileNavi::goto_first_mp3();
-
+	full_path = FileNavi::get_current_full_name();
+	full_path_len = strlen(full_path);
 
 
 	ESP_LOGI("main", "starting mp3 decode task");
@@ -1039,6 +1045,7 @@ void vMp3Decode( void * pvParameters )
 
 void vOLEDDisplayUpdate(void * pvParameters)
 {
+	int scroll_hold = 0;
 	int scroll_pos = 0;
 	int totalSeconds = 0;
 	int minutes = totalSeconds / 60;
@@ -1070,7 +1077,19 @@ void vOLEDDisplayUpdate(void * pvParameters)
 		scroll_pos++;
 
 		if (scroll_pos > full_path_len - MAX_CHARS)	
-			scroll_pos = 0;
+		{
+			//use this to hold the scrolling of the file name for a moment before returning to the beginning
+			if (scroll_hold < SCROLL_HOLD && scroll_pos > 0)
+			{
+				scroll_pos--;			
+				scroll_hold++;
+			}
+			else 
+			{
+				scroll_hold = 0;
+				scroll_pos = 0;
+			}
+		}
 
 		scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, file_name_buff);
 
@@ -1124,6 +1143,8 @@ void vOLEDDisplayUpdate(void * pvParameters)
 
 
 		vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
+
+		//printf("Free heep: %d\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
 	}
 }
 
@@ -1315,18 +1336,7 @@ void vFFT_FrontDisplay(void * pvParameters)
 					}					
 
 
-					// if (row >= r_bins_r[bin_i - 1])
-					// {
-					// 	pixels[bin_i + 81].r = 0;
-					// 	pixels[bin_i + 81].g = 0;
-					// 	pixels[bin_i + 81].b = 64;					
-					// }					
-					// else
-					// {
-					// 	pixels[bin_i + 81].r = 0;
-					// 	pixels[bin_i + 81].g = 0;
-					// 	pixels[bin_i + 81].b = 0;							
-					// }
+
 				}
 				
 			}
@@ -1386,6 +1396,23 @@ void vFrontSideDisplay(void * pvParameters)
 	}
 }
 
+void vBTSetup(void * pvParameters)
+{
+	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
+	
+	BT_a2db bt(bt_app_a2d_data_cb);
+	bt_control = &bt;
+	bt.connect_bluetooth(addr);
+	
+		//bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
+
+	while(1)
+	{
+		printf("Free heep: %d\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+		vTaskDelay(pdMS_TO_TICKS(250));
+	}
+}
+
 extern "C" void app_main(void)
 {
 	//FOR TESTING: address 42:fa:bf:75:ca:26, name Q50
@@ -1406,21 +1433,23 @@ extern "C" void app_main(void)
 	init_colors(pixel_colors);
 
 
-
-	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 2048, NULL, 1, NULL, 1);
-	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2048, NULL, configMAX_PRIORITIES - 5, NULL, 1);
-	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2048, NULL, 1, NULL, 1);
-	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*24, NULL, 10, &mp3TaskHandle, 1);
+	//xTaskCreatePinnedToCore(vBTSetup, "BG_SETUP", 1024 * 20, NULL, configMAX_PRIORITIES - 5, NULL, 0);
+	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 1024*2, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 1024*2, NULL, configMAX_PRIORITIES - 5, NULL, 1);
+	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 1024*2, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*17, NULL, 10, &mp3TaskHandle, 1);
 	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
 	//xTaskCreate(vFrontSideDisplay, "FRONT_SIDES", 1024*32, NULL, 2, NULL);
+
 
 	esp_bd_addr_t addr = { 0x42, 0xfa, 0xbf, 0x75, 0xca, 0x26 };
 	
 	BT_a2db bt(bt_app_a2d_data_cb);
 	bt_control = &bt;
 	bt.connect_bluetooth(addr);
+	
+		//bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
 
-	//bt.discover_bluetooth(CONFIG_SPEAKER_NAME);
 
 	
 }
