@@ -13,9 +13,9 @@
 
 typedef union {
   struct __attribute__ ((packed)) {
-    uint8_t r, g, b;
+    uint8_t g, r, b;
   };
-  uint32_t num;
+  // uint32_t num;
 } rgbVal;
 
 extern void ws2812_init(int gpioNum);

@@ -36,7 +36,7 @@
 #define PULSE_T1H	(  850 / (DURATION * DIVIDER));
 #define PULSE_T0L	(  850 / (DURATION * DIVIDER));
 #define PULSE_T1L	(  300 / (DURATION * DIVIDER));
-#define PULSE_TRS	(50000 / (DURATION * DIVIDER));
+#define PULSE_TRS	(5000 / (DURATION * DIVIDER));
 
 #define MAX_PULSES	32
 
@@ -102,8 +102,8 @@ void ws2812_copy()
       RMTMEM.chan[RMTCHANNEL].data32[j + i * 8 + offset].val =
 	ws2812_bits[(bit >> 7) & 0x01].val;
     }
-    if (i + ws2812_pos == ws2812_len - 1)
-      RMTMEM.chan[RMTCHANNEL].data32[7 + i * 8 + offset].duration1 = PULSE_TRS;
+    // if (i + ws2812_pos == ws2812_len - 1)
+    //   RMTMEM.chan[RMTCHANNEL].data32[7 + i * 8 + offset].duration1 = PULSE_TRS;
   }
 
   for (i *= 8; i < MAX_PULSES; i++)
@@ -163,13 +163,14 @@ void ws2812_setColors(unsigned int length, rgbVal *array)
 
 
   ws2812_len = (length * 3) * sizeof(uint8_t);
-  ws2812_buffer = (uint8_t *)malloc(ws2812_len);
+  // ws2812_buffer = (uint8_t *)malloc(ws2812_len);
+  ws2812_buffer = (uint8_t *)array;
 
-  for (i = 0; i < length; i++) {
-    ws2812_buffer[0 + i * 3] = array[i].g;
-    ws2812_buffer[1 + i * 3] = array[i].r;
-    ws2812_buffer[2 + i * 3] = array[i].b;
-  }
+  // for (i = 0; i < length; i++) {
+  //   ws2812_buffer[0 + i * 3] = array[i].g;
+  //   ws2812_buffer[1 + i * 3] = array[i].r;
+  //   ws2812_buffer[2 + i * 3] = array[i].b;
+  // }
 
   ws2812_pos = 0;
   ws2812_half = 0;
@@ -188,7 +189,7 @@ void ws2812_setColors(unsigned int length, rgbVal *array)
   vSemaphoreDelete(ws2812_sem);
   ws2812_sem = NULL;
 
-  free(ws2812_buffer);
+  // free(ws2812_buffer);
 
   return;
 }
