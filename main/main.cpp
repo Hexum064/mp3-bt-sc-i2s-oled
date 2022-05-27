@@ -17,6 +17,8 @@
 #include "kiss_fftr.h"
 #include "ws2812.h"
 #include <math.h>
+#include "esp_spiffs.h"
+#include "rgb_led_displays.h"
 
 extern "C" {
 
@@ -45,8 +47,6 @@ extern "C" {
 
 #define OLED_DISP_INT 250
 
-#define RGB_LED_COUNT 536
-
 #define SHORT_BUTTON_PUSH 50000ULL
 #define LONG_BUTTON_HOLD 750000ULL
 
@@ -68,7 +68,10 @@ extern "C" {
 
 #define SCROLL_HOLD 4
 
+#define MAX_DISPLAY_MODES 8
 
+#define NYAN_BASE_PATH "/nyan_data"
+#define NYAN_MP3_PATH "/nyan_data/Nyan3.mp3"
 
 TaskHandle_t mp3TaskHandle = NULL;
 
@@ -82,6 +85,7 @@ bool playing = false;
 bool i2s_output = false;
 bool bt_enabled = true;
 bool bt_discovery_mode = false;
+bool nyan_mode = false;
 bool has_started = false;
 bool f_change_file = false;
 bool f_muted = false;
@@ -95,6 +99,7 @@ char * full_path;
 uint16_t full_path_len = 0;
 rgbVal pixel_colors[8];
 BT_a2dp *bt_control;
+uint8_t display_index = 0;
 
 char bt_discovery_mode_flag_key[] = "btd";
 char bt_sink_name_key[] = "btname";
@@ -107,98 +112,31 @@ bt_device_param *bt_discovered_devices;
 uint8_t bt_discovered_count = 0;
 uint8_t bt_device_list_index = 0;
 
+
+uint8_t rgb_led_spi_tx_buff[RGB_LED_BYTE_COUNT];
+spi_device_handle_t rgb_led_spi_handle;
+spi_transaction_t rgb_led_spi_trans;
+	
+esp_vfs_spiffs_conf_t spiffs_cfg;
+
 SSD1306_t oled_display;
 
-	 kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
-	 kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
-	 kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
+kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
+kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
+kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
 
-	 int16_t l_channel[FFT_SAMPLE_SIZE];
-	 int16_t r_channel[FFT_SAMPLE_SIZE];
-	 rgbVal pixels[RGB_LED_COUNT];
+int16_t l_channel[FFT_SAMPLE_SIZE];
+int16_t r_channel[FFT_SAMPLE_SIZE];
+
 
 uint64_t max_v =0;
 #define VAL_OFFSET 1024
 
 inline uint16_t get_bar_mag(int64_t real, int64_t imaginary)
 {
-	// uint32_t val = (uint32_t)sqrt((real * real) + (imaginary * imaginary));
+
 	uint32_t val = abs(real) + abs(imaginary);
-
-	// if (val > max_v)
-	// {
-	// 	printf("real: %lld, img: %lld, %llu\n", real, imaginary, val);
-	// 	max_v = val;
-	// }
-
-	// if (val <= 1 + VAL_OFFSET)
-	// {
-	// 	return 0x00;
-	// }
-	// else if (val <= 2 + VAL_OFFSET)
-	// {
-	// 	return 0x01;
-	// }
-	// else if (val <= 4 + VAL_OFFSET)
-	// {
-	// 	return 0x03;
-	// }
-	// else if (val <= 8 + VAL_OFFSET)
-	// {
-	// 	return 0x07;
-	// }
-	// else if (val <= 16 + VAL_OFFSET)
-	// {
-	// 	return 0x0F;
-	// }
-	// else if (val <= 32 + VAL_OFFSET)
-	// {
-	// 	return 0x1F;
-	// }
-	// else if (val <= 64 + VAL_OFFSET)
-	// {
-	// 	return 0x3F;	
-	// }
-	// else if (val <= 128 + VAL_OFFSET)
-	// {
-	// 	return 0x7F;
-	// }
-	// else if (val <= 256 + VAL_OFFSET)
-	// {
-	// 	return 0xFF;
-	// }
-	// else if (val <= 512 + VAL_OFFSET)
-	// {
-	// 	return 0x1FF;
-	// }
-	// else if (val <= 1024 + VAL_OFFSET)
-	// {
-	// 	return 0x3FF;
-	// }
-	// else if (val <= 2048 + VAL_OFFSET)
-	// {
-	// 	return 0x7FF;
-	// }
-	// else if (val <= 4096 + VAL_OFFSET)
-	// {
-	// 	return 0xFFF;
-	// }
-	// else if (val <= 8192 + VAL_OFFSET)
-	// {
-	// 	return 0x1FFF;
-	// }
-	// else if (val <= 16384 + VAL_OFFSET)
-	// {
-	// 	return 0x3FFF;
-	// }
-	// else if (val <= 32768 + VAL_OFFSET)
-	// {
-	// 	return 0x7FFF;
-	// }
-	// else
-	// {
-	// 	return 0xFFFF;
-	// }				
+				
 	if (val == 0)
 	{
 		return 9;
@@ -239,79 +177,7 @@ inline uint16_t get_bar_mag(int64_t real, int64_t imaginary)
 	{
 		return 0;
 	}
-
-	// if (val <= VAL_OFFSET)
-	// {
-	// 	//return 0x01;
-	// 	return 1;
-	// }
-	// else if (val <= VAL_OFFSET * 2)
-	// {
-	// 	//return 0x03;
-	// 	return 2;
-	// }
-	// else if (val <= VAL_OFFSET * 3)
-	// {
-	// 	// return 0x07;
-	// 	return 3;
-	// }
-	// else if (val <= VAL_OFFSET * 4)
-	// {
-	// 	// return 0x0F;
-	// 	return 4;
-	// }
-	// else if (val <= VAL_OFFSET * 5)
-	// {
-	// 	// return 0x1F;
-	// 	return 5;
-	// }
-	// else if (val <= VAL_OFFSET * 6)
-	// {
-	// 	// return 0x3F;	
-	// 	return 6;
-	// }
-	// else if (val <= VAL_OFFSET * 7)
-	// {
-	// 	// return 0x7F;
-	// 	return 7;
-	// }
-	// else if (val <= VAL_OFFSET * 8)
-	// {
-	// 	// return 0xFF;
-	// 	return 8;
-	// }
-	// else if (val <= VAL_OFFSET * 9)
-	// {
-	// 	return 0x1FF;
-	// }
-	// else if (val <= VAL_OFFSET * 10)
-	// {
-	// 	return 0x3FF;
-	// }
-	// else if (val <= VAL_OFFSET * 1)
-	// {
-	// 	return 0x7FF;
-	// }
-	// else if (val <= VAL_OFFSET * 12)
-	// {
-	// 	return 0xFFF;
-	// }
-	// else if (val <= VAL_OFFSET * 13)
-	// {
-	// 	return 0x1FFF;
-	// }
-	// else if (val <= VAL_OFFSET * 14)
-	// {
-	// 	return 0x3FFF;
-	// }
-	// else if (val <= VAL_OFFSET * 15)
-	// {
-	// 	return 0x7FFF;
-	// }
-	// else
-	// {
-	// 	return 0xFFFF;
-	// }											
+											
 }
 
 
@@ -369,6 +235,11 @@ void init_display()
 	ssd1306_contrast(&oled_display, 0xff);
 
 
+	if (bt_discovery_mode)
+	{
+		return;
+	}
+
 	char bfb[] = "BigFuckingBadge";
 	char foxs_random[] = "Fox's Random";
 	char access_memories[] = " Access Memories";
@@ -379,6 +250,7 @@ void init_display()
 	ssd1306_display_text(&oled_display, 2, access_memories, 16, false);
 	ssd1306_display_text(&oled_display, 3, dc30, 4, false);
 
+	vTaskDelay(pdMS_TO_TICKS(3000));
 }
 
 void toggle_play_pause()
@@ -478,6 +350,11 @@ void play_next_song()
 		return;
 	}
 
+	if (nyan_mode)
+	{
+		return;
+	}
+
 	ESP_LOGI("main", "Going to next file.");
 	FileNavi::goto_next_mp3();
 	//For display
@@ -502,6 +379,12 @@ void play_previous_song()
 		return;
 	}
 
+
+	if (nyan_mode)
+	{
+		return;
+	}	
+
 	ESP_LOGI("main", "Going to previous file.");
 	//TODO: if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
 	FileNavi::goto_prev_mp3();
@@ -515,22 +398,38 @@ void play_previous_song()
 
 void cycle_display()
 {
+	if (nyan_mode)
+	{
+		return;
+	}	
 
-}
 
-void toggle_nayn_mode()
-{
-
+	if (display_index == MAX_DISPLAY_MODES - 1)
+	{
+		display_index = 0;
+	}
+	else
+	{
+		display_index++;
+	}
 }
 
 void toggle_bt_discovery_mode()
 {
 	printf("Toggling bt discovery mode\n");
+	nyan_mode = false;
 	nvs_set_u8(bt_control->get_nvs_handle(), bt_discovery_mode_flag_key, 1);
 	nvs_commit(bt_control->get_nvs_handle());
 	esp_restart();
 
 
+}
+
+void toggle_nyan_mode()
+{
+	printf("Toggling nyan display mode\n");
+	nyan_mode = !nyan_mode;
+	f_change_file = true; //trigger the mp3 decoder to switch 
 }
 
 void scroll_text(char * text, int str_len, int max_len, int start_pos, char * buffer)
@@ -692,6 +591,7 @@ void vButtonInput( void * pvParameters )
 							
 							break;
 						case DISPLAY_BUTTON:					
+							toggle_nyan_mode();
 							break;
 						case VOL_DOWN_BUTTON:
 							volume_down();			
@@ -734,6 +634,7 @@ void vButtonInput( void * pvParameters )
 						toggle_output();
 						break;
 					case DISPLAY_BUTTON:
+						cycle_display();
 						break;
 					case VOL_DOWN_BUTTON:
 						volume_down();						
@@ -902,42 +803,102 @@ void display_fft(short * buff)
 	//printf("Drawing FFT\n");
 	//Draw the display
 	//this will normally be RGB_LED_COUNT but for now, it's just 81 for now and both halves are done at the same time
-	for (i = 0 ; i < 81 ; i++)			
-	{
-		bin_i = i % 9;
-		row = i / 9;
+	// for (i = 0 ; i < 81 ; i++)			
+	// {
+	// 	bin_i = i % 9;
+	// 	row = i / 9;
 		
-		pixels[i].r = 0;
-		pixels[i].g = 0;
-		pixels[i].b = 0;	
+	// 	pixels[i].r = 0;
+	// 	pixels[i].g = 0;
+	// 	pixels[i].b = 0;	
 
-		pixels[i + 81].r = 0;
-		pixels[i + 81].g = 0;
-		pixels[i + 81].b = 0;	
+	// 	pixels[i + 81].r = 0;
+	// 	pixels[i + 81].g = 0;
+	// 	pixels[i + 81].b = 0;	
 
-		if (bin_i) 
+	// 	if (bin_i) 
+	// 	{
+	// 		if (row >= l_bins_r[bin_i - 1])
+	// 		{
+	// 			pixels[i].r = pixel_colors[bin_i - 1].r;
+	// 			pixels[i].g = pixel_colors[bin_i - 1].g;
+	// 			pixels[i].b = pixel_colors[bin_i - 1].b;	
+				
+	// 		}				
+
+	// 		if (row >= r_bins_r[bin_i - 1])
+	// 		{
+	// 			pixels[i + 81].r = pixel_colors[bin_i - 1].r;
+	// 			pixels[i + 81].g = pixel_colors[bin_i - 1].g;
+	// 			pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
+				
+	// 		}					
+
+	// 	}
+		
+	// }
+
+	// ws2812_setColors(RGB_LED_COUNT, pixels);
+
+	//FOR TESTING
+		uint8_t red = 0;
+		uint8_t green = 0;
+		uint8_t blue = 0;
+static uint32_t test_color = 0;
+		
+
+		red = pixel_colors[(test_color >> 5) % 8].r;
+		green = pixel_colors[(test_color >> 5) % 8].g;
+		blue = pixel_colors[(test_color >> 5) % 8].b;
+
+		for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
 		{
-			if (row >= l_bins_r[bin_i - 1])
-			{
-				pixels[i].r = pixel_colors[bin_i - 1].r;
-				pixels[i].g = pixel_colors[bin_i - 1].g;
-				pixels[i].b = pixel_colors[bin_i - 1].b;	
-				
-			}				
+			rgb_led_spi_tx_buff[0 + i * 3] = green;		//g
+			rgb_led_spi_tx_buff[1 + i * 3] = red;		//r
+			rgb_led_spi_tx_buff[2 + i * 3] = blue;		//b
 
-			if (row >= r_bins_r[bin_i - 1])
-			{
-				pixels[i + 81].r = pixel_colors[bin_i - 1].r;
-				pixels[i + 81].g = pixel_colors[bin_i - 1].g;
-				pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
-				
-			}					
+			// pixels[i].r = 0;
+			// pixels[i].g = 0;
+			// pixels[i].b = 64;
 
 		}
+		test_color++;
+		//spi_device_transmit(rgb_led_spi_handle, &rgb_led_spi_trans);
+		spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
 		
-	}
 
-	ws2812_setColors(RGB_LED_COUNT, pixels);
+//DONE FOR TESTING
+}
+
+void display_nyan()
+{
+	memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void update_front_display(short * buff)
+{
+	if (nyan_mode)
+	{
+		display_nyan();
+	}
+	else
+	{
+		switch (display_index)
+		{
+			case 0:
+			case 1:
+			case 2:
+			case 3:
+			case 4:
+			case 5:
+			case 6:
+			case 7:
+				display_fft(buff);
+				break;
+		}
+	}
+	
 }
 
 void vMp3Decode( void * pvParameters )
@@ -968,9 +929,19 @@ void vMp3Decode( void * pvParameters )
 		has_started = false;
 
 
-		printf("loading file %s\n", FileNavi::get_current_full_name());
-		vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
-		player = new MP3Player(FileNavi::get_current_full_name());
+		if (nyan_mode)
+		{
+			printf("loading nyan mp3\n");
+			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
+			player = new MP3Player(NYAN_MP3_PATH);
+		}
+		else
+		{
+			printf("loading file %s\n", FileNavi::get_current_full_name());
+			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
+			player = new MP3Player(FileNavi::get_current_full_name());
+		}
+
 
 
 
@@ -1045,7 +1016,7 @@ void vMp3Decode( void * pvParameters )
 
 			if (sample_len > 0)
 			{
-				display_fft(fillBuff);
+				update_front_display(fillBuff);
 			}
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
@@ -1086,13 +1057,15 @@ void vMp3Decode( void * pvParameters )
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
 			{
-		
-				ESP_LOGI("main", "Done with current song. Going to next file.");
-				FileNavi::goto_next_mp3();
-				//For display
-				full_path = FileNavi::get_current_full_name();
-				full_path_len = strlen(full_path);
-				//end for display				
+				if (!nyan_mode)
+				{
+					ESP_LOGI("main", "Done with current song. Going to next file.");
+					FileNavi::goto_next_mp3();
+					//For display
+					full_path = FileNavi::get_current_full_name();
+					full_path_len = strlen(full_path);
+					//end for display				
+				}
 				f_change_file = true;
 
 			}
@@ -1142,7 +1115,7 @@ void oled_display_normal_mode()
 
 
 		
-		ssd1306_display_text(&oled_display, 1, disp_buff, strlen(disp_buff), false);
+		ssd1306_display_text(&oled_display, 1, disp_buff, 16, false);
 
 		disp_buff[0] = '\0';
 
@@ -1155,7 +1128,7 @@ void oled_display_normal_mode()
 			sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
 		}
 		
-		ssd1306_display_text(&oled_display, 2, disp_buff, strlen(disp_buff), false);
+		ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
 
 		disp_buff[0] = '\0';
 
@@ -1169,10 +1142,20 @@ void oled_display_normal_mode()
 			sprintf(disp_buff, "BT Connected to:");	
 		}
 		
-		ssd1306_display_text(&oled_display, 3, disp_buff, strlen(disp_buff), false);
-		ssd1306_display_text(&oled_display, 4, bt_sink_name, strlen(bt_sink_name), false);
-
-		// ssd1306_display_text(&oled_display, 5, "<DISPLAY MODE>", strlen("<DISPLAY MODE>"), false);
+		ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
+		ssd1306_display_text(&oled_display, 4, bt_sink_name, 16, false);
+		
+		if (nyan_mode)
+		{
+			sprintf(disp_buff, "   Nyan  Mode   ");	
+		}
+		else
+		{
+			sprintf(disp_buff, "Display mode: %d ", display_index);	
+			
+		}
+		
+		ssd1306_display_text(&oled_display, 5, disp_buff, 16, false);
 
 		// ssd1306_display_text(&oled_display, 6, "<BATTERY?>", strlen("<BATTERY?>"), false);
 	
@@ -1249,7 +1232,7 @@ void vOLEDDisplayUpdate(void * pvParameters)
 			}
 
 			scroll_text(header, strlen(header), MAX_CHARS, scroll_pos, str_buff);		
-			ssd1306_display_text(&oled_display, 0, str_buff, strlen(str_buff), false);
+			ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
 
 			oled_display_discovery_mode();
 			vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
@@ -1257,28 +1240,36 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	}
 	else
 	{
+		
 		while (1)
 		{
 
-			scroll_pos++;
-
-			if (scroll_pos > full_path_len - MAX_CHARS)	
+			if (nyan_mode)
 			{
-				//use this to hold the scrolling of the file name for a moment before returning to the beginning
-				if (scroll_hold < SCROLL_HOLD && scroll_pos > 0)
-				{
-					scroll_pos--;			
-					scroll_hold++;
-				}
-				else 
-				{
-					scroll_hold = 0;
-					scroll_pos = 0;
-				}
+				ssd1306_display_text(&oled_display, 0, "  Nyan Cat MP3  ", 16, false);
 			}
+			else
+			{
+				scroll_pos++;
 
-			scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, str_buff);	
-			ssd1306_display_text(&oled_display, 0, str_buff, strlen(str_buff), false);
+				if (scroll_pos > full_path_len - MAX_CHARS)	
+				{
+					//use this to hold the scrolling of the file name for a moment before returning to the beginning
+					if (scroll_hold < SCROLL_HOLD && scroll_pos > 0)
+					{
+						scroll_pos--;			
+						scroll_hold++;
+					}
+					else 
+					{
+						scroll_hold = 0;
+						scroll_pos = 0;
+					}
+				}
+
+				scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, str_buff);	
+				ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
+			}
 
 			oled_display_normal_mode();
 			vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
@@ -1289,253 +1280,6 @@ void vOLEDDisplayUpdate(void * pvParameters)
 }
 
 
-
-// void vFFT_FrontDisplay(void * pvParameters)
-// {
-// 	ws2812_init(FRONT_DISPLAY_PIN);
-// 	rgbVal pixels[RGB_LED_COUNT];
-// 	rgbVal pixel_colors[8];
-
-// 	init_colors(pixel_colors);
-
-
-
-// 	int i;
-// 	uint8_t bin_i = 0;
-// 	uint8_t row = 0;	
-
-// 	int16_t l_channel[FFT_SAMPLE_SIZE];
-// 	int16_t r_channel[FFT_SAMPLE_SIZE];
-// 	uint32_t l_bins[FFT_BINS];
-// 	uint32_t r_bins[FFT_BINS];
-// 	uint16_t l_val = 0;
-// 	uint16_t r_val = 0;
-
-
-// 	int32_t l_bins_r[FFT_BINS];
-// 	int32_t r_bins_r[FFT_BINS];
-// 	int32_t l_bins_i[FFT_BINS];
-// 	int32_t r_bins_i[FFT_BINS];
-
-// 	kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
-// 	kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
-
-// 	// int nfft = FFT_SAMPLE_SIZE ;
-
-// 	short * buff = buff0;
-// 	// the various buffers  
-
-// 	// kiss_fft_cpx* l_spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
-// 	// kiss_fft_cpx* r_spectrum = (kiss_fft_cpx*) calloc(nfft + 1, sizeof(kiss_fft_cpx));
-
-// 	kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
-// 	// Create the FFT config structure
-
-
-// 	while(1)
-// 	{
-
-	
-
-
-
-
-// 		if (playing)
-// 		{
-// 			if (buff_num)
-// 			{
-// 				buff = buff1;
-// 			} 
-
-// 			//printf("Generatting FFT\n");
-// 			for (i = 0; i < FFT_SAMPLE_SIZE; i++)
-// 			{
-// 				l_channel[i] = buff[i * 2];
-// 				r_channel[i] = buff[(i * 2) + 1];
-// 			}
-
-// 			kiss_fftr(st, l_channel, l_spectrum);
-// 			kiss_fftr(st, r_channel, r_spectrum);
-
-// 			//Binning
-
-
-// 			for (i = 0 ; i < FFT_BINS ; i++)			
-// 			{
-// 				l_bins_r[i] = 0;
-// 				l_bins_i[i] = 0;
-// 				r_bins_r[i] = 0;
-// 				r_bins_i[i] = 0;
-// 			}
-
-// 			//First have are real numbers we will use for max
-// 			for(i = 0; i < FFT_SAMPLE_SIZE >> 2; i++)
-// 			{
-
-// 				//bins
-// 				if (i <= 3 * 2)
-// 				{		
-// 					l_bins_r[0] += l_spectrum[i].r;
-// 					l_bins_i[0] += l_spectrum[i].i;
-// 					r_bins_r[0] += r_spectrum[i].r;
-// 					r_bins_i[0] += r_spectrum[i].i;
-// 				}
-// 				else if (i <= 6 * 2)
-// 				{
-// 					l_bins_r[1] += l_spectrum[i].r;
-// 					l_bins_i[1] += l_spectrum[i].i;
-// 					r_bins_r[1] += r_spectrum[i].r;
-// 					r_bins_i[1] += r_spectrum[i].i;					
-// 				}
-// 				else if (i <= 13 * 2)
-// 				{
-// 					l_bins_r[2] += l_spectrum[i].r;
-// 					l_bins_i[2] += l_spectrum[i].i;
-// 					r_bins_r[2] += r_spectrum[i].r;
-// 					r_bins_i[2] += r_spectrum[i].i;							
-// 				}
-// 				else if (i <= 27 * 2)
-// 				{
-// 					l_bins_r[3] += l_spectrum[i].r;
-// 					l_bins_i[3] += l_spectrum[i].i;
-// 					r_bins_r[3] += r_spectrum[i].r;
-// 					r_bins_i[3] += r_spectrum[i].i;							
-// 				}
-// 				else if (i <= 55 * 2)
-// 				{
-// 					l_bins_r[4] += l_spectrum[i].r;
-// 					l_bins_i[4] += l_spectrum[i].i;
-// 					r_bins_r[4] += r_spectrum[i].r;
-// 					r_bins_i[4] += r_spectrum[i].i;							
-// 				}
-// 				else if (i <= 112 * 2)
-// 				{
-// 					l_bins_r[5] += l_spectrum[i].r;
-// 					l_bins_i[5] += l_spectrum[i].i;
-// 					r_bins_r[5] += r_spectrum[i].r;
-// 					r_bins_i[5] += r_spectrum[i].i;							
-// 				}
-// 				else if (i <= 229 * 2)
-// 				{
-// 					l_bins_r[6] += l_spectrum[i].r;
-// 					l_bins_i[6] += l_spectrum[i].i;		
-// 					r_bins_r[6] += r_spectrum[i].r;
-// 					r_bins_i[6] += r_spectrum[i].i;					
-// 				}
-// 				else 
-// 				{
-// 					l_bins_r[7] += l_spectrum[i].r;
-// 					l_bins_i[7] += l_spectrum[i].i;
-// 					r_bins_r[7] += r_spectrum[i].r;
-// 					r_bins_i[7] += r_spectrum[i].i;							
-// 				}
-
-
-// 			}
-
-// 			for (i = 0; i < FFT_BINS; i++)
-// 			{
-// 				l_bins_r[i] = get_bar_mag(l_bins_r[i], l_bins_i[i]);
-// 				r_bins_r[i] = get_bar_mag(r_bins_r[i], r_bins_i[i]);
-// 			}
-
-
-
-// 			//printf("Drawing FFT\n");
-// 			//Draw the display
-// 			//this will normally be RGB_LED_COUNT but for now, it's just 81 for now and both halves are done at the same time
-// 			for (i = 0 ; i < 81 ; i++)			
-// 			{
-// 				bin_i = i % 9;
-// 				row = i / 9;
-				
-// 				pixels[i].r = 0;
-// 				pixels[i].g = 0;
-// 				pixels[i].b = 0;	
-
-// 				pixels[i + 81].r = 0;
-// 				pixels[i + 81].g = 0;
-// 				pixels[i + 81].b = 0;	
-
-// 				if (bin_i) 
-// 				{
-// 					if (row >= l_bins_r[bin_i - 1])
-// 					{
-// 						pixels[i].r = pixel_colors[bin_i - 1].r;
-// 						pixels[i].g = pixel_colors[bin_i - 1].g;
-// 						pixels[i].b = pixel_colors[bin_i - 1].b;	
-						
-// 					}				
-
-// 					if (row >= r_bins_r[bin_i - 1])
-// 					{
-// 						pixels[i + 81].r = pixel_colors[bin_i - 1].r;
-// 						pixels[i + 81].g = pixel_colors[bin_i - 1].g;
-// 						pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
-						
-// 					}					
-
-
-
-// 				}
-				
-// 			}
-
-
-
-
-// 			ws2812_setColors(162, pixels);
-		
-// 		}
-		
-// 		vTaskDelay(pdMS_TO_TICKS(50));
-// 	}
-// }
-
-
-void vFrontSideDisplay(void * pvParameters)
-{
-	//Using this as a test for now
-	ws2812_init(FRONT_DISPLAY_PIN);
-	rgbVal pixels[RGB_LED_COUNT];
-	uint8_t red = 0;
-	uint8_t green = 0;
-	uint8_t blue = 0;
-
-	while (1)
-	{
-		red += 4;
-		if (red >= 64)
-		{
-			red = 0;
-			green += 4;
-
-			if (green >= 64)
-			{
-				green = 0;
-				blue += 4;
-
-				if (blue >= 64)
-				{
-					blue = 0;
-				}
-			}
-		}
-
-		for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
-		{
-			
-			pixels[i].r = red;
-			pixels[i].g = green;
-			pixels[i].b = blue;
-
-		}
-		ws2812_setColors(RGB_LED_COUNT, pixels);
-
-		vTaskDelay(pdMS_TO_TICKS(50));
-	}
-}
-
 static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 {
 	bt_discovered_devices = devices;
@@ -1545,6 +1289,49 @@ static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 		printf("Found %s at address %02x:%02x:%02x:%02x:%02x:%02x\n", devices[i].name, devices[i].address[0], devices[i].address[1], devices[i].address[2], devices[i].address[3], devices[i].address[4], devices[i].address[5]);
 	}
 	return 0;
+}
+
+
+void init_rgb_led_spi()
+{
+
+
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = GPIO_NUM_23,
+        .miso_io_num = GPIO_NUM_NC,
+        .sclk_io_num = GPIO_NUM_19,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4000
+    };
+   	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH1));
+    spi_device_interface_config_t devcfg={
+        .mode = 0,          //SPI mode 0        
+		.clock_speed_hz = 800000, //Should be 800KHz
+        .spics_io_num = -1,
+        .queue_size = 1
+    };
+
+	printf("SPI add device: %d\n", spi_bus_add_device( SPI3_HOST, &devcfg, &rgb_led_spi_handle));
+
+	//Set this up to clear all the lights
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	rgb_led_spi_trans.length = RGB_LED_BYTE_COUNT * 8; //length in bits
+	rgb_led_spi_trans.tx_buffer = rgb_led_spi_tx_buff;
+	// trans.flags = SPI_TRANS_MODE_OCT;
+	 printf("SPI queue transmit: %d\n", spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY));	
+	//printf("SPI transmit: %d\n", spi_device_transmit(rgb_led_spi_handle, &rgb_led_spi_trans));	
+}
+
+void init_spiffs()
+{
+	spiffs_cfg = {
+		.base_path = NYAN_BASE_PATH,
+		.partition_label = NULL,
+		.max_files = 5,
+		.format_if_mount_failed = false
+	};	
 }
 
 extern "C" void app_main(void)
@@ -1561,19 +1348,6 @@ extern "C" void app_main(void)
     // xTaskCreatePinnedToCore(vTaskCode, "BT_CORE", 32768, NULL, 1, NULL, 0);
 
 	//i2s_output = true;
-
-	for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
-	{
-		
-		pixels[i].r = 0;
-		pixels[i].g = 0;
-		pixels[i].b = 0;
-
-	}
-	ws2812_init(FRONT_DISPLAY_PIN);
-	ws2812_setColors(RGB_LED_COUNT, pixels);
-
-
 
 	
 	bt_enabled = true;
@@ -1634,6 +1408,9 @@ extern "C" void app_main(void)
 		bt_enabled = false;			
 	}
 
+
+	init_rgb_led_spi();
+
 	if (bt_discovery_mode)
 	{
 		//TODO: start with oled showing found devices
@@ -1644,6 +1421,9 @@ extern "C" void app_main(void)
 
 		SDCard* sdc = new SDCard();
 		sdc->init();
+
+		init_spiffs();
+		esp_vfs_spiffs_register(&spiffs_cfg);
 
 		init_colors(pixel_colors);
 
