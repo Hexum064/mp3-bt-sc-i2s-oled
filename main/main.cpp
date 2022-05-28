@@ -253,6 +253,30 @@ void init_display()
 	vTaskDelay(pdMS_TO_TICKS(3000));
 }
 
+uint8_t nyan_hold = 0;
+uint8_t nyan_i = 0;
+
+void display_nyan()
+{
+	//memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
+
+	if (nyan_hold % 2 == 0)
+	{
+		memcpy(rgb_led_spi_tx_buff, nyan_imgs[nyan_i], RGB_LED_BYTE_COUNT);
+
+		nyan_i++;
+
+		if (nyan_i == 12)
+		{
+			nyan_i = 1;
+		}
+	}
+	
+
+	nyan_hold++;
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
 void toggle_play_pause()
 {
 	//Don't want to play or pause in this mode 
@@ -429,6 +453,10 @@ void toggle_nyan_mode()
 {
 	printf("Toggling nyan display mode\n");
 	nyan_mode = !nyan_mode;
+	if (nyan_mode)
+	{
+		display_nyan();
+	}
 	f_change_file = true; //trigger the mp3 decoder to switch 
 }
 
@@ -870,11 +898,7 @@ static uint32_t test_color = 0;
 //DONE FOR TESTING
 }
 
-void display_nyan()
-{
-	memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
-	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
-}
+
 
 void update_front_display(short * buff)
 {
@@ -973,7 +997,10 @@ void vMp3Decode( void * pvParameters )
 				break;
 			}
 
-
+			if (sample_len > 0 && has_started)
+			{
+				update_front_display(fillBuff);
+			}
 			
 			player->decodeSample(fillBuff, &sample_len);
 			total_samples += sample_len;
@@ -1014,10 +1041,7 @@ void vMp3Decode( void * pvParameters )
 			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
 			total_samples += sample_len;
 
-			if (sample_len > 0)
-			{
-				update_front_display(fillBuff);
-			}
+
 
 			if (sample_len > 0 && !has_started) //make sure this only happens once
 			{
@@ -1052,6 +1076,7 @@ void vMp3Decode( void * pvParameters )
 				}
 				f_muted = false;
 			}
+
 
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
