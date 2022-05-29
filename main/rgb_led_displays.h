@@ -1,9 +1,40 @@
+#ifndef RGB_LED_DISPLAYS_H
+#define RGB_LED_DISPLAYS_H
+
 #define LEFT_LED_COUNT 250
 #define RIGHT_LED_COUNT 252
 #define RGB_LED_COUNT (LEFT_LED_COUNT+RIGHT_LED_COUNT)
 #define RGB_LED_BYTE_COUNT (RGB_LED_COUNT * 3)
 #define RIGHT_SCROLL_LEN 131
 #define DAFT_PUNK_SCROLL_LEN 80
+#define FFT_SAMPLE_SIZE_POWER 11
+#define FFT_SAMPLE_SIZE (1 << FFT_SAMPLE_SIZE_POWER) 
+#define FFT_BINS 8
+#define VAL_OFFSET 1024
+
+struct rgbVal
+{
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
+};
+
+rgbVal pixel_colors[8];
+uint8_t rgb_led_spi_tx_buff[RGB_LED_BYTE_COUNT];
+spi_device_handle_t rgb_led_spi_handle;
+spi_transaction_t rgb_led_spi_trans;
+
+kiss_fft_cpx l_spectrum[FFT_SAMPLE_SIZE + 1];
+kiss_fft_cpx r_spectrum[FFT_SAMPLE_SIZE + 1];
+kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
+
+int16_t l_channel[FFT_SAMPLE_SIZE];
+int16_t r_channel[FFT_SAMPLE_SIZE];
+
+uint8_t nyan_hold = 0;
+uint8_t nyan_i = 0;
+
+
 
 const uint8_t nyan_imgs[12][RGB_LED_BYTE_COUNT] = {
 {
@@ -1183,3 +1214,644 @@ const uint8_t daft_punk_scroll[DAFT_PUNK_SCROLL_LEN * 3 * 25] =
 0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 };
+
+
+
+
+
+
+inline uint16_t get_bar_mag(int64_t real, int64_t imaginary)
+{
+
+	uint32_t val = abs(real) + abs(imaginary);
+				
+	if (val == 0)
+	{
+		return 9;
+	}
+	else if (val <= VAL_OFFSET)
+	{
+		return 8;
+	}
+	else if (val <= VAL_OFFSET * 2)
+	{
+		return 7;
+	}
+	else if (val <= VAL_OFFSET * 4)
+	{
+		return 6;
+	}
+	else if (val <= VAL_OFFSET * 6)
+	{
+		return 5;
+	}
+	else if (val <= VAL_OFFSET * 8)
+	{
+		return 4;
+	}
+	else if (val <= VAL_OFFSET * 10)
+	{
+		return 3;
+	}
+	else if (val <= VAL_OFFSET * 12)
+	{
+		return 2;
+	}
+	else if (val <= VAL_OFFSET * 14)
+	{
+		return 1;
+	} 
+	else
+	{
+		return 0;
+	}
+											
+}
+
+
+void init_colors(rgbVal * pixel_colors)
+{
+	//violet
+	pixel_colors[0].r = 38;
+	pixel_colors[0].g = 0;
+	pixel_colors[0].b = 32;
+
+	//purple
+	pixel_colors[1].r = 18;
+	pixel_colors[1].g = 0;
+	pixel_colors[1].b = 48;
+
+	//blue
+	pixel_colors[2].r = 0;
+	pixel_colors[2].g = 0;
+	pixel_colors[2].b = 96;
+
+	//cyan
+	pixel_colors[3].r = 0;
+	pixel_colors[3].g = 24;
+	pixel_colors[3].b = 48;
+
+	//green
+	pixel_colors[4].r = 0;
+	pixel_colors[4].g = 64;
+	pixel_colors[4].b = 0;
+
+	//yellow
+	pixel_colors[5].r = 32;
+	pixel_colors[5].g = 32;
+	pixel_colors[5].b = 0;
+
+	//orange
+	pixel_colors[6].r = 64;
+	pixel_colors[6].g = 32;
+	pixel_colors[6].b = 0;
+
+	//red
+	pixel_colors[7].r = 64;
+	pixel_colors[7].g = 0;
+	pixel_colors[7].b = 0;
+}
+
+void display_fft(short * buff)
+{
+	static int i;
+	static int32_t r_max = 0;
+	static int32_t l_max = 0;
+	static int32_t l_bins_r[FFT_BINS];
+	static int32_t r_bins_r[FFT_BINS];
+	static int32_t l_bins_i[FFT_BINS];
+	static int32_t r_bins_i[FFT_BINS];
+	
+	uint8_t row_i = 0;
+	uint16_t offset;
+//printf("Generatting FFT\n");
+	for (i = 0; i < FFT_SAMPLE_SIZE; i++)
+	{
+		l_channel[i] = buff[i * 2];
+		r_channel[i] = buff[(i * 2) + 1];
+
+		if (l_channel[i] > l_max)
+		{
+			l_max = l_channel[i];
+		}
+
+		if (r_channel[i] > r_max)
+		{
+			r_max = r_channel[i];
+		}		
+	}
+
+	kiss_fftr(st, l_channel, l_spectrum);
+	kiss_fftr(st, r_channel, r_spectrum);
+
+	//Binning
+
+
+	for (i = 0 ; i < FFT_BINS ; i++)			
+	{
+		l_bins_r[i] = 0;
+		l_bins_i[i] = 0;
+		r_bins_r[i] = 0;
+		r_bins_i[i] = 0;
+	}
+
+	//First have are real numbers we will use for max
+	for(i = 0; i < FFT_SAMPLE_SIZE >> 2; i++)
+	{
+
+		//bins
+		if (i <= 3 * 2)
+		{		
+			l_bins_r[0] += l_spectrum[i].r;
+			l_bins_i[0] += l_spectrum[i].i;
+			r_bins_r[0] += r_spectrum[i].r;
+			r_bins_i[0] += r_spectrum[i].i;
+		}
+		else if (i <= 6 * 2)
+		{
+			l_bins_r[1] += l_spectrum[i].r;
+			l_bins_i[1] += l_spectrum[i].i;
+			r_bins_r[1] += r_spectrum[i].r;
+			r_bins_i[1] += r_spectrum[i].i;					
+		}
+		else if (i <= 13 * 2)
+		{
+			l_bins_r[2] += l_spectrum[i].r;
+			l_bins_i[2] += l_spectrum[i].i;
+			r_bins_r[2] += r_spectrum[i].r;
+			r_bins_i[2] += r_spectrum[i].i;							
+		}
+		else if (i <= 27 * 2)
+		{
+			l_bins_r[3] += l_spectrum[i].r;
+			l_bins_i[3] += l_spectrum[i].i;
+			r_bins_r[3] += r_spectrum[i].r;
+			r_bins_i[3] += r_spectrum[i].i;							
+		}
+		else if (i <= 55 * 2)
+		{
+			l_bins_r[4] += l_spectrum[i].r;
+			l_bins_i[4] += l_spectrum[i].i;
+			r_bins_r[4] += r_spectrum[i].r;
+			r_bins_i[4] += r_spectrum[i].i;							
+		}
+		else if (i <= 112 * 2)
+		{
+			l_bins_r[5] += l_spectrum[i].r;
+			l_bins_i[5] += l_spectrum[i].i;
+			r_bins_r[5] += r_spectrum[i].r;
+			r_bins_i[5] += r_spectrum[i].i;							
+		}
+		else if (i <= 229 * 2)
+		{
+			l_bins_r[6] += l_spectrum[i].r;
+			l_bins_i[6] += l_spectrum[i].i;		
+			r_bins_r[6] += r_spectrum[i].r;
+			r_bins_i[6] += r_spectrum[i].i;					
+		}
+		else 
+		{
+			l_bins_r[7] += l_spectrum[i].r;
+			l_bins_i[7] += l_spectrum[i].i;
+			r_bins_r[7] += r_spectrum[i].r;
+			r_bins_i[7] += r_spectrum[i].i;							
+		}
+
+
+	}
+
+	for (i = 0; i < FFT_BINS; i++)
+	{
+		l_bins_r[i] = get_bar_mag(l_bins_r[i], l_bins_i[i]);
+		r_bins_r[i] = get_bar_mag(r_bins_r[i], r_bins_i[i]);
+	}
+
+	//clear everything
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	//Want to draw the graph starting at col 5. Then 8 lines. Then a space, then 8 lines
+
+
+	for (; row_i < 10; row_i++)
+	{
+		for (i = 0; i < FFT_BINS; i++)
+		{
+			//pixel_colors[i] means using the pixel color for the bin number since there are 8 of each
+
+			//12 = 4 cols at 3 bytes each
+			//row_i * 75 = 25 LEDs per row at 3 bytes each
+			//i * 3 = bin index at 3 bytes each
+			offset = (12 + (i * 3) + (row_i * 75));
+			if (l_bins_r[i] <= row_i)
+			{
+				//For left side: byte color offset + starting col offset + bin index + row offset
+				rgb_led_spi_tx_buff[0 + offset] = pixel_colors[i].g;
+				rgb_led_spi_tx_buff[1 + offset] = pixel_colors[i].r;
+				rgb_led_spi_tx_buff[2 + offset] = pixel_colors[i].b;
+			}
+
+			if (r_bins_r[7-i] <= row_i)
+			{
+				//+ 27 for the extra col spacing: 9 cols at 3 bytes each
+				rgb_led_spi_tx_buff[0 + offset + 27] = pixel_colors[7-i].g;
+				rgb_led_spi_tx_buff[1 + offset + 27] = pixel_colors[7-i].r;
+				rgb_led_spi_tx_buff[2 + offset + 27] = pixel_colors[7-i].b;
+			}			
+		}
+
+	}
+
+	
+	l_max >>= 12;
+	r_max >>= 12;
+
+	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), vu_left[l_max], (RIGHT_LED_COUNT * 3) / 2);
+	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + (RIGHT_LED_COUNT * 3) / 2, vu_left[r_max], (RIGHT_LED_COUNT * 3) / 2);
+
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+
+}
+
+void display_sins(short * buff)
+{
+	int16_t l_val;
+	int16_t r_val;
+
+
+	for (int i = 0; i < FFT_SAMPLE_SIZE; i++)
+	{
+		l_channel[i] = buff[i * 2];
+		r_channel[i] = buff[(i * 2) + 1];
+	
+	}
+
+	//clear everything
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	//use 64 to trim down the waveform
+	//We are only showing a small portion of the wave form
+	//after we get the value, it needs to be divided into steps of 10 and have a color assigned to it
+
+	for (uint8_t col_i = 0; col_i < 25; col_i++)
+	{
+		l_val = l_channel[col_i * 80] ;
+		
+		//This sets the color and the vertial position
+		if (l_val > 26212)
+		{
+			rgb_led_spi_tx_buff[0 + (0 * 75) + (col_i * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (0 * 75) + (col_i * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (0 * 75) + (col_i * 3)] = pixel_colors[7].b;
+		}
+		else if(l_val > 19659)
+		{
+			rgb_led_spi_tx_buff[0 + (1 * 75) + (col_i * 3)] = pixel_colors[6].g;
+			rgb_led_spi_tx_buff[1 + (1 * 75) + (col_i * 3)] = pixel_colors[6].r;
+			rgb_led_spi_tx_buff[2 + (1 * 75) + (col_i * 3)] = pixel_colors[6].b;
+		}
+		else if(l_val > 13106)
+		{
+			rgb_led_spi_tx_buff[0 + (2 * 75) + (col_i * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (2 * 75) + (col_i * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (2 * 75) + (col_i * 3)] = pixel_colors[4].b;		
+		}
+		else if(l_val > 6553)
+		{
+			rgb_led_spi_tx_buff[0 + (3 * 75) + (col_i * 3)] = pixel_colors[2].g;
+			rgb_led_spi_tx_buff[1 + (3 * 75) + (col_i * 3)] = pixel_colors[2].r;
+			rgb_led_spi_tx_buff[2 + (3 * 75) + (col_i * 3)] = pixel_colors[2].b;		
+		}
+		else if(l_val > 1)
+		{
+			rgb_led_spi_tx_buff[0 + (4 * 75) + (col_i * 3)] = pixel_colors[0].g;
+			rgb_led_spi_tx_buff[1 + (4 * 75) + (col_i * 3)] = pixel_colors[0].r;
+			rgb_led_spi_tx_buff[2 + (4 * 75) + (col_i * 3)] = pixel_colors[0].b;		
+		}
+		else if(l_val > -6553)
+		{
+			rgb_led_spi_tx_buff[0 + (5 * 75) + (col_i * 3)] = pixel_colors[1].g;
+			rgb_led_spi_tx_buff[1 + (5 * 75) + (col_i * 3)] = pixel_colors[1].r;
+			rgb_led_spi_tx_buff[2 + (5 * 75) + (col_i * 3)] = pixel_colors[1].b;				
+		}
+		else if(l_val > -13106)
+		{
+			rgb_led_spi_tx_buff[0 + (6 * 75) + (col_i * 3)] = pixel_colors[3].g;
+			rgb_led_spi_tx_buff[1 + (6 * 75) + (col_i * 3)] = pixel_colors[3].r;
+			rgb_led_spi_tx_buff[2 + (6 * 75) + (col_i * 3)] = pixel_colors[3].b;				
+		}
+		else if(l_val > -19659)
+		{
+			rgb_led_spi_tx_buff[0 + (7 * 75) + (col_i * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (7 * 75) + (col_i * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (7 * 75) + (col_i * 3)] = pixel_colors[4].b;				
+		}												
+		else if(l_val > -26212)
+		{
+			rgb_led_spi_tx_buff[0 + (8 * 75) + (col_i * 3)] = pixel_colors[5].g;
+			rgb_led_spi_tx_buff[1 + (8 * 75) + (col_i * 3)] = pixel_colors[5].r;
+			rgb_led_spi_tx_buff[2 + (8 * 75) + (col_i * 3)] = pixel_colors[5].b;				
+		}	
+		else
+		{
+			rgb_led_spi_tx_buff[0 + (9 * 75) + (col_i * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (9 * 75) + (col_i * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (9 * 75) + (col_i * 3)] = pixel_colors[7].b;	
+		}		
+	}
+
+
+	for (uint8_t row_i = 0; row_i < 36; row_i++)
+	{
+		r_val = r_channel[row_i * 56] ;
+		
+		//This sets the color and the vertial position
+		//21 is the number of byes in each row
+		if (r_val > 24576)
+		{
+			rgb_led_spi_tx_buff[0 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].b;
+		}
+		else if(r_val > 16384)
+		{
+			rgb_led_spi_tx_buff[0 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].b;
+		}
+		else if(r_val > 8192)
+		{
+			rgb_led_spi_tx_buff[0 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].g;
+			rgb_led_spi_tx_buff[1 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].r;
+			rgb_led_spi_tx_buff[2 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].b;	
+		}
+		else if(r_val > -4096)
+		{
+			rgb_led_spi_tx_buff[0 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].g;
+			rgb_led_spi_tx_buff[1 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].r;
+			rgb_led_spi_tx_buff[2 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].b;		
+		}
+		else if(r_val > -12288)
+		{
+			rgb_led_spi_tx_buff[0 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].g;
+			rgb_led_spi_tx_buff[1 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].r;
+			rgb_led_spi_tx_buff[2 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].b;		
+		}
+		else if(r_val > -20480)
+		{
+			rgb_led_spi_tx_buff[0 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].g;
+			rgb_led_spi_tx_buff[1 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].r;
+			rgb_led_spi_tx_buff[2 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].b;				
+		}
+		else
+		{
+			rgb_led_spi_tx_buff[0 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].b;	
+		}		
+	}
+
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void draw_rand_red_left()
+{
+	uint64_t num0;
+	uint64_t num1;
+	uint64_t num2;
+	uint64_t num3;
+
+	esp_fill_random(&num0, 8);
+	esp_fill_random(&num1, 8);
+	esp_fill_random(&num2, 8);
+	esp_fill_random(&num3, 8);
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num0 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + (i * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + (i * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + (i * 3)] = 0;
+		}
+
+		num0 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num1 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 64) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 64) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 64) * 3)] = 0;
+		}
+
+		num1 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num2 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 128) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 128) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 128) * 3)] = 0;
+		}
+
+		num2 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < LEFT_LED_COUNT - 192; i++)
+	{
+		if ((num3 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 192) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 192) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 192) * 3)] = 0;
+		}
+
+		num3 >>= 1;
+	}	
+}
+
+void draw_yellow_scroll_right()
+{
+	static uint16_t scroll_pos = 0;
+	
+	uint16_t val;
+	if (scroll_pos + 36 > RIGHT_SCROLL_LEN)
+	{
+		val = (RIGHT_SCROLL_LEN - scroll_pos) * 21;
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), right_scroll + (scroll_pos * 21), val); //21 because it's 7 cols at 3 bytes each
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + val, right_scroll, 756-val); //756 is 36 * 7 * 3 for 36 rows, 7 cols and  3 for three bytes
+	}
+	else
+	{
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), right_scroll + (scroll_pos * 21), 756);
+	}
+
+
+	scroll_pos++;
+
+	if (scroll_pos >= RIGHT_SCROLL_LEN)
+	{
+		scroll_pos = 0;
+	}
+}
+
+void draw_daft_punk_scroll_left()
+{
+	static uint16_t scroll_pos = 0;
+	uint8_t i;
+	uint16_t val;
+	if (scroll_pos + 25 > DAFT_PUNK_SCROLL_LEN)
+	{
+		val = (DAFT_PUNK_SCROLL_LEN - scroll_pos) * 3;
+		// // memcpy(rgb_led_spi_tx_buff, daft_punk_scroll + (scroll_pos * 30), val); //75 because it's 25 cols at 3 bytes each
+		// // memcpy(rgb_led_spi_tx_buff + val, daft_punk_scroll, 750-val); //750 is 25 * 10 * 3 for 10 rows, 25 cols and  3 for three bytes
+
+		for (i = 0; i < 10; i++)
+		{
+			memcpy(rgb_led_spi_tx_buff + (i * 75), daft_punk_scroll  + (scroll_pos * 3) + (i * DAFT_PUNK_SCROLL_LEN * 3), val);
+			memcpy(rgb_led_spi_tx_buff + (i * 75) + val, daft_punk_scroll + (i * DAFT_PUNK_SCROLL_LEN * 3), 75-val);
+		}
+
+	}
+	else
+	{
+		// memcpy(rgb_led_spi_tx_buff, daft_punk_scroll + (scroll_pos * 30), 750);
+
+		for (i = 0; i < 10; i++)
+		{
+			memcpy(rgb_led_spi_tx_buff + (i * 75), daft_punk_scroll  + (scroll_pos * 3) + (i * DAFT_PUNK_SCROLL_LEN * 3), 75);
+		}
+
+
+	}
+
+
+	scroll_pos++;
+
+	if (scroll_pos >= DAFT_PUNK_SCROLL_LEN)
+	{
+		scroll_pos = 0;
+	}
+}
+
+void draw_blinking_happy_right()
+{
+	static bool blinking = false;
+	uint8_t val;
+	
+	if (!blinking)
+	{
+		esp_fill_random(&val, 1);
+
+		if (val > 250)
+		{
+			blinking = true;
+			memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[1], RIGHT_LED_COUNT * 3);
+		}
+		else
+		{
+			memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[0], RIGHT_LED_COUNT * 3);
+		}
+	}
+	else
+	{
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[2], RIGHT_LED_COUNT * 3);
+		blinking = false;
+	}
+}
+
+void display_combo_option_0()
+{
+	static uint8_t hold;
+
+	
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_rand_red_left();
+	draw_yellow_scroll_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+
+	
+}
+
+void display_combo_option_1()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_daft_punk_scroll_left();
+	draw_yellow_scroll_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void display_combo_option_2()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_rand_red_left();
+	draw_blinking_happy_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void display_combo_option_3()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_daft_punk_scroll_left();
+	draw_blinking_happy_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void blank_display()
+{
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void display_nyan()
+{
+	//memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
+
+	if (nyan_hold % 2 == 0)
+	{
+		memcpy(rgb_led_spi_tx_buff, nyan_imgs[nyan_i], RGB_LED_BYTE_COUNT);
+
+		nyan_i++;
+
+		if (nyan_i == 12)
+		{
+			nyan_i = 1;
+		}
+	}
+	
+
+	nyan_hold++;
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+#endif //RGB_LED_DISPLAYS_H
