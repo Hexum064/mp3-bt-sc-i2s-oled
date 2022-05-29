@@ -68,7 +68,7 @@ extern "C" {
 
 #define SCROLL_HOLD 4
 
-#define MAX_DISPLAY_MODES 8
+#define MAX_DISPLAY_MODES 7
 
 #define NYAN_BASE_PATH "/nyan_data"
 #define NYAN_MP3_PATH "/nyan_data/Nyan3.mp3"
@@ -442,8 +442,13 @@ void toggle_bt_discovery_mode()
 {
 	printf("Toggling bt discovery mode\n");
 	nyan_mode = false;
-	nvs_set_u8(bt_control->get_nvs_handle(), bt_discovery_mode_flag_key, 1);
-	nvs_commit(bt_control->get_nvs_handle());
+
+	if (!bt_discovery_mode)
+	{
+		nvs_set_u8(bt_control->get_nvs_handle(), bt_discovery_mode_flag_key, 1);
+		nvs_commit(bt_control->get_nvs_handle());
+	}
+
 	esp_restart();
 
 
@@ -456,6 +461,7 @@ void toggle_nyan_mode()
 	if (nyan_mode)
 	{
 		display_nyan();
+		
 	}
 	f_change_file = true; //trigger the mp3 decoder to switch 
 }
@@ -690,34 +696,42 @@ void vButtonInput( void * pvParameters )
 
 void init_colors(rgbVal * pixel_colors)
 {
-	pixel_colors[0].r = 37;
+	//violet
+	pixel_colors[0].r = 38;
 	pixel_colors[0].g = 0;
 	pixel_colors[0].b = 32;
 
+	//purple
 	pixel_colors[1].r = 18;
 	pixel_colors[1].g = 0;
 	pixel_colors[1].b = 48;
 
+	//blue
 	pixel_colors[2].r = 0;
 	pixel_colors[2].g = 0;
 	pixel_colors[2].b = 96;
 
+	//cyan
 	pixel_colors[3].r = 0;
 	pixel_colors[3].g = 24;
 	pixel_colors[3].b = 48;
 
+	//green
 	pixel_colors[4].r = 0;
 	pixel_colors[4].g = 64;
 	pixel_colors[4].b = 0;
 
+	//yellow
 	pixel_colors[5].r = 32;
 	pixel_colors[5].g = 32;
 	pixel_colors[5].b = 0;
 
+	//orange
 	pixel_colors[6].r = 64;
 	pixel_colors[6].g = 32;
 	pixel_colors[6].b = 0;
 
+	//red
 	pixel_colors[7].r = 64;
 	pixel_colors[7].g = 0;
 	pixel_colors[7].b = 0;
@@ -728,17 +742,30 @@ void display_fft(short * buff)
 	static int i;
 	static uint8_t bin_i = 0;
 	static uint8_t row = 0;	
-
+	static int32_t r_max = 0;
+	static int32_t l_max = 0;
 	static int32_t l_bins_r[FFT_BINS];
 	static int32_t r_bins_r[FFT_BINS];
 	static int32_t l_bins_i[FFT_BINS];
 	static int32_t r_bins_i[FFT_BINS];
-
+	
+	uint8_t row_i = 0;
+	uint16_t offset;
 //printf("Generatting FFT\n");
 	for (i = 0; i < FFT_SAMPLE_SIZE; i++)
 	{
 		l_channel[i] = buff[i * 2];
 		r_channel[i] = buff[(i * 2) + 1];
+
+		if (l_channel[i] > l_max)
+		{
+			l_max = l_channel[i];
+		}
+
+		if (r_channel[i] > r_max)
+		{
+			r_max = r_channel[i];
+		}		
 	}
 
 	kiss_fftr(st, l_channel, l_spectrum);
@@ -826,82 +853,417 @@ void display_fft(short * buff)
 		r_bins_r[i] = get_bar_mag(r_bins_r[i], r_bins_i[i]);
 	}
 
+	//clear everything
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	//Want to draw the graph starting at col 5. Then 8 lines. Then a space, then 8 lines
 
 
-	//printf("Drawing FFT\n");
-	//Draw the display
-	//this will normally be RGB_LED_COUNT but for now, it's just 81 for now and both halves are done at the same time
-	// for (i = 0 ; i < 81 ; i++)			
-	// {
-	// 	bin_i = i % 9;
-	// 	row = i / 9;
-		
-	// 	pixels[i].r = 0;
-	// 	pixels[i].g = 0;
-	// 	pixels[i].b = 0;	
-
-	// 	pixels[i + 81].r = 0;
-	// 	pixels[i + 81].g = 0;
-	// 	pixels[i + 81].b = 0;	
-
-	// 	if (bin_i) 
-	// 	{
-	// 		if (row >= l_bins_r[bin_i - 1])
-	// 		{
-	// 			pixels[i].r = pixel_colors[bin_i - 1].r;
-	// 			pixels[i].g = pixel_colors[bin_i - 1].g;
-	// 			pixels[i].b = pixel_colors[bin_i - 1].b;	
-				
-	// 		}				
-
-	// 		if (row >= r_bins_r[bin_i - 1])
-	// 		{
-	// 			pixels[i + 81].r = pixel_colors[bin_i - 1].r;
-	// 			pixels[i + 81].g = pixel_colors[bin_i - 1].g;
-	// 			pixels[i + 81].b = pixel_colors[bin_i - 1].b;					
-				
-	// 		}					
-
-	// 	}
-		
-	// }
-
-	// ws2812_setColors(RGB_LED_COUNT, pixels);
-
-	//FOR TESTING
-		uint8_t red = 0;
-		uint8_t green = 0;
-		uint8_t blue = 0;
-static uint32_t test_color = 0;
-		
-
-		red = pixel_colors[(test_color >> 5) % 8].r;
-		green = pixel_colors[(test_color >> 5) % 8].g;
-		blue = pixel_colors[(test_color >> 5) % 8].b;
-
-		for (uint16_t i = 0; i < RGB_LED_COUNT; i++)
+	for (; row_i < 10; row_i++)
+	{
+		for (i = 0; i < FFT_BINS; i++)
 		{
-			rgb_led_spi_tx_buff[0 + i * 3] = green;		//g
-			rgb_led_spi_tx_buff[1 + i * 3] = red;		//r
-			rgb_led_spi_tx_buff[2 + i * 3] = blue;		//b
+			//pixel_colors[i] means using the pixel color for the bin number since there are 8 of each
 
-			// pixels[i].r = 0;
-			// pixels[i].g = 0;
-			// pixels[i].b = 64;
+			//12 = 4 cols at 3 bytes each
+			//row_i * 75 = 25 LEDs per row at 3 bytes each
+			//i * 3 = bin index at 3 bytes each
+			offset = (12 + (i * 3) + (row_i * 75));
+			if (l_bins_r[i] <= row_i)
+			{
+				//For left side: byte color offset + starting col offset + bin index + row offset
+				rgb_led_spi_tx_buff[0 + offset] = pixel_colors[i].g;
+				rgb_led_spi_tx_buff[1 + offset] = pixel_colors[i].r;
+				rgb_led_spi_tx_buff[2 + offset] = pixel_colors[i].b;
+			}
 
+			if (r_bins_r[7-i] <= row_i)
+			{
+				//+ 27 for the extra col spacing: 9 cols at 3 bytes each
+				rgb_led_spi_tx_buff[0 + offset + 27] = pixel_colors[7-i].g;
+				rgb_led_spi_tx_buff[1 + offset + 27] = pixel_colors[7-i].r;
+				rgb_led_spi_tx_buff[2 + offset + 27] = pixel_colors[7-i].b;
+			}			
 		}
-		test_color++;
-		//spi_device_transmit(rgb_led_spi_handle, &rgb_led_spi_trans);
-		spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
-		
 
-//DONE FOR TESTING
+	}
+
+	
+	l_max >>= 12;
+	r_max >>= 12;
+
+	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), vu_left[l_max], (RIGHT_LED_COUNT * 3) / 2);
+	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + (RIGHT_LED_COUNT * 3) / 2, vu_right[r_max], (RIGHT_LED_COUNT * 3) / 2);
+
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+
 }
 
+void display_sins(short * buff)
+{
+	int16_t l_val;
+	int16_t r_val;
 
+
+	for (int i = 0; i < FFT_SAMPLE_SIZE; i++)
+	{
+		l_channel[i] = buff[i * 2];
+		r_channel[i] = buff[(i * 2) + 1];
+	
+	}
+
+	//clear everything
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	//use 64 to trim down the waveform
+	//We are only showing a small portion of the wave form
+	//after we get the value, it needs to be divided into steps of 10 and have a color assigned to it
+
+	for (uint8_t col_i = 0; col_i < 25; col_i++)
+	{
+		l_val = l_channel[col_i * 80] ;
+		
+		//This sets the color and the vertial position
+		if (l_val > 26212)
+		{
+			rgb_led_spi_tx_buff[0 + (0 * 75) + (col_i * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (0 * 75) + (col_i * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (0 * 75) + (col_i * 3)] = pixel_colors[7].b;
+		}
+		else if(l_val > 19659)
+		{
+			rgb_led_spi_tx_buff[0 + (1 * 75) + (col_i * 3)] = pixel_colors[6].g;
+			rgb_led_spi_tx_buff[1 + (1 * 75) + (col_i * 3)] = pixel_colors[6].r;
+			rgb_led_spi_tx_buff[2 + (1 * 75) + (col_i * 3)] = pixel_colors[6].b;
+		}
+		else if(l_val > 13106)
+		{
+			rgb_led_spi_tx_buff[0 + (2 * 75) + (col_i * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (2 * 75) + (col_i * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (2 * 75) + (col_i * 3)] = pixel_colors[4].b;		
+		}
+		else if(l_val > 6553)
+		{
+			rgb_led_spi_tx_buff[0 + (3 * 75) + (col_i * 3)] = pixel_colors[2].g;
+			rgb_led_spi_tx_buff[1 + (3 * 75) + (col_i * 3)] = pixel_colors[2].r;
+			rgb_led_spi_tx_buff[2 + (3 * 75) + (col_i * 3)] = pixel_colors[2].b;		
+		}
+		else if(l_val > 1)
+		{
+			rgb_led_spi_tx_buff[0 + (4 * 75) + (col_i * 3)] = pixel_colors[0].g;
+			rgb_led_spi_tx_buff[1 + (4 * 75) + (col_i * 3)] = pixel_colors[0].r;
+			rgb_led_spi_tx_buff[2 + (4 * 75) + (col_i * 3)] = pixel_colors[0].b;		
+		}
+		else if(l_val > -6553)
+		{
+			rgb_led_spi_tx_buff[0 + (5 * 75) + (col_i * 3)] = pixel_colors[1].g;
+			rgb_led_spi_tx_buff[1 + (5 * 75) + (col_i * 3)] = pixel_colors[1].r;
+			rgb_led_spi_tx_buff[2 + (5 * 75) + (col_i * 3)] = pixel_colors[1].b;				
+		}
+		else if(l_val > -13106)
+		{
+			rgb_led_spi_tx_buff[0 + (6 * 75) + (col_i * 3)] = pixel_colors[3].g;
+			rgb_led_spi_tx_buff[1 + (6 * 75) + (col_i * 3)] = pixel_colors[3].r;
+			rgb_led_spi_tx_buff[2 + (6 * 75) + (col_i * 3)] = pixel_colors[3].b;				
+		}
+		else if(l_val > -19659)
+		{
+			rgb_led_spi_tx_buff[0 + (7 * 75) + (col_i * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (7 * 75) + (col_i * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (7 * 75) + (col_i * 3)] = pixel_colors[4].b;				
+		}												
+		else if(l_val > -26212)
+		{
+			rgb_led_spi_tx_buff[0 + (8 * 75) + (col_i * 3)] = pixel_colors[5].g;
+			rgb_led_spi_tx_buff[1 + (8 * 75) + (col_i * 3)] = pixel_colors[5].r;
+			rgb_led_spi_tx_buff[2 + (8 * 75) + (col_i * 3)] = pixel_colors[5].b;				
+		}	
+		else
+		{
+			rgb_led_spi_tx_buff[0 + (9 * 75) + (col_i * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (9 * 75) + (col_i * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (9 * 75) + (col_i * 3)] = pixel_colors[7].b;	
+		}		
+	}
+
+
+	for (uint8_t row_i = 0; row_i < 36; row_i++)
+	{
+		r_val = r_channel[row_i * 56] ;
+		
+		//This sets the color and the vertial position
+		//21 is the number of byes in each row
+		if (r_val > 24576)
+		{
+			rgb_led_spi_tx_buff[0 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (0 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].b;
+		}
+		else if(r_val > 16384)
+		{
+			rgb_led_spi_tx_buff[0 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].g;
+			rgb_led_spi_tx_buff[1 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].r;
+			rgb_led_spi_tx_buff[2 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].b;
+		}
+		else if(r_val > 8192)
+		{
+			rgb_led_spi_tx_buff[0 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].g;
+			rgb_led_spi_tx_buff[1 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].r;
+			rgb_led_spi_tx_buff[2 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].b;	
+		}
+		else if(r_val > -4096)
+		{
+			rgb_led_spi_tx_buff[0 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].b;		
+		}
+		else if(r_val > -12288)
+		{
+			rgb_led_spi_tx_buff[0 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].g;
+			rgb_led_spi_tx_buff[1 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].r;
+			rgb_led_spi_tx_buff[2 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].b;		
+		}
+		else if(r_val > -20480)
+		{
+			rgb_led_spi_tx_buff[0 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].g;
+			rgb_led_spi_tx_buff[1 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].r;
+			rgb_led_spi_tx_buff[2 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].b;				
+		}
+		else
+		{
+			rgb_led_spi_tx_buff[0 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].g;
+			rgb_led_spi_tx_buff[1 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].r;
+			rgb_led_spi_tx_buff[2 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].b;	
+		}		
+	}
+
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void draw_rand_red_left()
+{
+	uint64_t num0;
+	uint64_t num1;
+	uint64_t num2;
+	uint64_t num3;
+
+	esp_fill_random(&num0, 8);
+	esp_fill_random(&num1, 8);
+	esp_fill_random(&num2, 8);
+	esp_fill_random(&num3, 8);
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num0 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + (i * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + (i * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + (i * 3)] = 0;
+		}
+
+		num0 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num1 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 64) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 64) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 64) * 3)] = 0;
+		}
+
+		num1 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		if ((num2 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 128) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 128) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 128) * 3)] = 0;
+		}
+
+		num2 >>= 1;
+	}
+
+	for (uint8_t i = 0; i < LEFT_LED_COUNT - 192; i++)
+	{
+		if ((num3 & 0x01))
+		{
+			rgb_led_spi_tx_buff[0 + ((i + 192) * 3)] = 0;
+			rgb_led_spi_tx_buff[1 + ((i + 192) * 3)] = 64;
+			rgb_led_spi_tx_buff[2 + ((i + 192) * 3)] = 0;
+		}
+
+		num3 >>= 1;
+	}	
+}
+
+void draw_yellow_scroll_right()
+{
+	static uint16_t scroll_pos = 0;
+	
+	uint16_t val;
+	if (scroll_pos + 36 > RIGHT_SCROLL_LEN)
+	{
+		val = (RIGHT_SCROLL_LEN - scroll_pos) * 21;
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), right_scroll + (scroll_pos * 21), val); //21 because it's 7 cols at 3 bytes each
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + val, right_scroll, 756-val); //756 is 36 * 7 * 3 for 36 rows, 7 cols and  3 for three bytes
+	}
+	else
+	{
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), right_scroll + (scroll_pos * 21), 756);
+	}
+
+
+	scroll_pos++;
+
+	if (scroll_pos >= RIGHT_SCROLL_LEN)
+	{
+		scroll_pos = 0;
+	}
+}
+
+void draw_daft_punk_scroll_left()
+{
+	static uint16_t scroll_pos = 0;
+	uint8_t i;
+	uint16_t val;
+	if (scroll_pos + 25 > DAFT_PUNK_SCROLL_LEN)
+	{
+		val = (DAFT_PUNK_SCROLL_LEN - scroll_pos) * 3;
+		// // memcpy(rgb_led_spi_tx_buff, daft_punk_scroll + (scroll_pos * 30), val); //75 because it's 25 cols at 3 bytes each
+		// // memcpy(rgb_led_spi_tx_buff + val, daft_punk_scroll, 750-val); //750 is 25 * 10 * 3 for 10 rows, 25 cols and  3 for three bytes
+
+		for (i = 0; i < 10; i++)
+		{
+			memcpy(rgb_led_spi_tx_buff + (i * 75), daft_punk_scroll  + (scroll_pos * 3) + (i * DAFT_PUNK_SCROLL_LEN * 3), val);
+			memcpy(rgb_led_spi_tx_buff + (i * 75) + val, daft_punk_scroll + (i * DAFT_PUNK_SCROLL_LEN * 3), 75-val);
+		}
+
+	}
+	else
+	{
+		// memcpy(rgb_led_spi_tx_buff, daft_punk_scroll + (scroll_pos * 30), 750);
+
+		for (i = 0; i < 10; i++)
+		{
+			memcpy(rgb_led_spi_tx_buff + (i * 75), daft_punk_scroll  + (scroll_pos * 3) + (i * DAFT_PUNK_SCROLL_LEN * 3), 75);
+		}
+
+
+	}
+
+
+	scroll_pos++;
+
+	if (scroll_pos >= DAFT_PUNK_SCROLL_LEN)
+	{
+		scroll_pos = 0;
+	}
+}
+
+void draw_blinking_happy_right()
+{
+	static bool blinking = false;
+	uint8_t val;
+	
+	if (!blinking)
+	{
+		esp_fill_random(&val, 1);
+
+		if (val > 250)
+		{
+			blinking = true;
+			memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[1], RIGHT_LED_COUNT * 3);
+		}
+		else
+		{
+			memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[0], RIGHT_LED_COUNT * 3);
+		}
+	}
+	else
+	{
+		memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), happy_face[2], RIGHT_LED_COUNT * 3);
+		blinking = false;
+	}
+}
+
+void display_combo_option_0()
+{
+	static uint8_t hold;
+
+	
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_rand_red_left();
+	draw_yellow_scroll_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+
+	
+}
+
+void display_combo_option_1()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_daft_punk_scroll_left();
+	draw_yellow_scroll_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void display_combo_option_2()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_rand_red_left();
+	draw_blinking_happy_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void display_combo_option_3()
+{
+	static uint8_t hold;
+
+	if ((hold++ % 2))
+	{
+		return;
+	}
+
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	draw_daft_punk_scroll_left();
+	draw_blinking_happy_right();
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+void blank_display()
+{
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
 
 void update_front_display(short * buff)
 {
+
+
 	if (nyan_mode)
 	{
 		display_nyan();
@@ -911,17 +1273,31 @@ void update_front_display(short * buff)
 		switch (display_index)
 		{
 			case 0:
+				display_sins(buff);
+				break;
 			case 1:
+				display_combo_option_0();
+				break;
 			case 2:
+				display_combo_option_1();
+				break;
 			case 3:
+				display_combo_option_2();
+				break;
 			case 4:
+				display_combo_option_3();
+				break;
 			case 5:
-			case 6:
-			case 7:
 				display_fft(buff);
 				break;
+			default:
+				blank_display();
+				break;
+
 		}
 	}
+
+	
 	
 }
 
