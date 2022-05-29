@@ -242,6 +242,15 @@ void adc_init()
 	ESP_LOGI("main", "Starting ADC Init\n");
 	printf("adc1 config width: %d\n", adc1_config_width((adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT));
     printf("adc1 config atten: %d\n", adc1_config_channel_atten(ADC_BATT_CHANNEL, ADC_BATT_ATTEN));
+
+	//Do a quick battery reading to prime the output
+
+	for (int i = 0; i < BATT_ROLLING_AVG_CNT; i++)
+	{
+		vTaskDelay(pdMS_TO_TICKS(5));
+		get_batt_percent();
+		
+	}
 }
 
 

@@ -5,7 +5,7 @@
 #define BATT_100 2000	//approx 6v with a 100K/22K divider
 #define BATT_0	1500	//approx 4.1v with a 100K/22K divider
 #define BATT_ADC_RANGE (BATT_100 - BATT_0)
-#define BATT_ROLLING_AVG_CNT 40
+#define BATT_ROLLING_AVG_CNT 50
 
 int total_samples = 0;
 uint16_t current_sample_rate = 0;
