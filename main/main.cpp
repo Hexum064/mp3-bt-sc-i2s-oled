@@ -237,6 +237,14 @@ void init_bt_device_info()
 
 }
 
+void adc_init()
+{
+	ESP_LOGI("main", "Starting ADC Init\n");
+	printf("adc1 config width: %d\n", adc1_config_width((adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT));
+    printf("adc1 config atten: %d\n", adc1_config_channel_atten(ADC_BATT_CHANNEL, ADC_BATT_ATTEN));
+}
+
+
 static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 {
 	bt_discovered_devices = devices;
@@ -848,12 +856,6 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	}
 }
 
-void adc_init()
-{
-	ESP_LOGI("main", "Starting ADC Init\n");
-	printf("adc1 config width: %d\n", adc1_config_width((adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT));
-    printf("adc1 config atten: %d\n", adc1_config_channel_atten(ADC_BATT_CHANNEL, ADC_BATT_ATTEN));
-}
 
 
 extern "C" void app_main(void)
