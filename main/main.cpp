@@ -19,6 +19,9 @@
 #include "utilities.h"
 #include "button_handling.h"
 #include "rgb_led_displays.h"
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
+
 extern "C" {
 
 	#include "btc_av.h"
@@ -57,17 +60,12 @@ extern "C" {
 #define PAUSE_BUTTON 2
 #define PREVIOUS_BUTTON 1
 
-
-//#define DEBUG
-
-
-
 #define SCROLL_HOLD 4
-
-
 
 #define NYAN_BASE_PATH "/nyan_data"
 #define NYAN_MP3_PATH "/nyan_data/Nyan3.mp3"
+
+#define ADC_BATT_ATTEN ADC_ATTEN_DB_6
 
 TaskHandle_t mp3TaskHandle = NULL;
 
@@ -85,14 +83,10 @@ bool sd_initialized = false;
 Output *output = NULL;
 int buff_pos = 0;
 i2s_pin_config_t i2s_speaker_pins;
-int total_samples = 0;
-uint16_t current_sample_rate = 0;
-uint64_t mp3_run_time = 0;
 
 esp_vfs_spiffs_conf_t spiffs_cfg;
 
 SSD1306_t oled_display;
-
 
 
 void init_button_input()
@@ -663,78 +657,70 @@ void vMp3Decode( void * pvParameters )
 void oled_display_normal_mode()
 {
 
-	int totalSeconds = 0;
+	int totalSeconds = get_runtime_seconds();
 	int minutes = totalSeconds / 60;
 	int seconds = totalSeconds % 60;
+
 	char disp_buff[24];	
 	
+	disp_buff[0] = '\0';
 
-
-		if (current_sample_rate > 0)
-			totalSeconds = (int)(total_samples / current_sample_rate);
-		//printf("samples: %d, rate: %d, seconds %d\n", total_samples, current_sample_rate, (int)(total_samples / current_sample_rate));
-		minutes = totalSeconds / 60;
-		seconds = totalSeconds % 60;
-
-
-
-		disp_buff[0] = '\0';
-
-		if (playing)
-		{
-			sprintf(disp_buff, "%02d:%02d Playing", minutes, seconds);	
-		}
-		else
-		{
-			sprintf(disp_buff, "%02d:%02d Paused ", minutes, seconds);	
-		}
+	if (playing)
+	{
+		sprintf(disp_buff, "%02d:%02d Playing  ", minutes, seconds);	
+	}
+	else
+	{
+		sprintf(disp_buff, "%02d:%02d Paused   ", minutes, seconds);	
+	}
 
 
 
+	
+	ssd1306_display_text(&oled_display, 1, disp_buff, 16, false);
+
+	disp_buff[0] = '\0';
+
+	if (i2s_output)
+	{
+		sprintf(disp_buff, "Vol:%02d%% Out:i2s ", (int)((output_volume / MAX_VOL) * 100));	
+	}
+	else
+	{
+		sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
+	}
+	
+	ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
+
+	disp_buff[0] = '\0';
+
+	if (bt_control->get_a2d_state() != 5)
+	{
+		sprintf(disp_buff, "BT Attaching to:");	
+								
+	}
+	else
+	{
+		sprintf(disp_buff, "BT Connected to:");	
+	}
+	
+	ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
+	ssd1306_display_text(&oled_display, 4, bt_sink_name, 16, false);
+	
+	if (nyan_mode)
+	{
+		sprintf(disp_buff, "   Nyan  Mode   ");	
+	}
+	else
+	{
+		sprintf(disp_buff, "Display mode: %d ", display_index);	
 		
-		ssd1306_display_text(&oled_display, 1, disp_buff, 16, false);
+	}
+	
+	ssd1306_display_text(&oled_display, 5, disp_buff, 16, false);
 
-		disp_buff[0] = '\0';
-
-		if (i2s_output)
-		{
-			sprintf(disp_buff, "Vol:%02d%% Out:i2s ", (int)((output_volume / MAX_VOL) * 100));	
-		}
-		else
-		{
-			sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
-		}
-		
-		ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
-
-		disp_buff[0] = '\0';
-
-		if (bt_control->get_a2d_state() != 5)
-		{
-			sprintf(disp_buff, "BT Attaching to:");	
-								   
-		}
-		else
-		{
-			sprintf(disp_buff, "BT Connected to:");	
-		}
-		
-		ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
-		ssd1306_display_text(&oled_display, 4, bt_sink_name, 16, false);
-		
-		if (nyan_mode)
-		{
-			sprintf(disp_buff, "   Nyan  Mode   ");	
-		}
-		else
-		{
-			sprintf(disp_buff, "Display mode: %d ", display_index);	
-			
-		}
-		
-		ssd1306_display_text(&oled_display, 5, disp_buff, 16, false);
-
-		// ssd1306_display_text(&oled_display, 6, "<BATTERY?>", strlen("<BATTERY?>"), false);
+	sprintf(disp_buff, "Battery %d%%    ", get_batt_percent());
+	ssd1306_display_text(&oled_display, 6, disp_buff, 16, false);
 	
 }	
 
@@ -862,6 +848,12 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	}
 }
 
+void adc_init()
+{
+	ESP_LOGI("main", "Starting ADC Init\n");
+	printf("adc1 config width: %d\n", adc1_config_width((adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT));
+    printf("adc1 config atten: %d\n", adc1_config_channel_atten(ADC_BATT_CHANNEL, ADC_BATT_ATTEN));
+}
 
 
 extern "C" void app_main(void)
@@ -903,6 +895,8 @@ extern "C" void app_main(void)
 	}
 	else
 	{		
+
+		adc_init();
 
 		SDCard* sdc = new SDCard();
 

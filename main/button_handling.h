@@ -2,10 +2,12 @@
 #define BUTTON_HANDLING_H
 
 #include "rgb_led_displays.h"
+#include "utilities.h"
 
 #define MAX_VOL 4096
 #define VOL_STEP (MAX_VOL / 16)
 #define MAX_DISPLAY_MODES 7
+#define SECONDS_TILL_RESET_CURRENT_SONG 2
 
 bool playing = false;
 bool i2s_output = false;
@@ -132,8 +134,8 @@ void play_next_song()
 	}
 
 	ESP_LOGI("main", "Going to next file.");
-	FileNavi::goto_next_mp3();
 	//For display
+    FileNavi::goto_next_mp3();
 	full_path = FileNavi::get_current_full_name();
 	full_path_len = strlen(full_path);
 	//end for display	
@@ -162,8 +164,13 @@ void play_previous_song()
 	}	
 
 	ESP_LOGI("main", "Going to previous file.");
-	//TODO: if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
-	FileNavi::goto_prev_mp3();
+
+    
+    if (get_runtime_seconds() < SECONDS_TILL_RESET_CURRENT_SONG)
+    {
+	    FileNavi::goto_prev_mp3();
+    }
+	
 	//For display
 	full_path = FileNavi::get_current_full_name();
 	full_path_len = strlen(full_path);
