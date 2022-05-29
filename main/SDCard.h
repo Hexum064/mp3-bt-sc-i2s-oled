@@ -15,7 +15,8 @@
 #define PIN_NUM_MOSI  GPIO_NUM_13
 #define PIN_NUM_CLK   GPIO_NUM_14
 #define PIN_NUM_CS    GPIO_NUM_15
-#define SPI_DMA_CHAN    1
+#define PIN_NUM_CD    GPIO_NUM_27
+#define SPI_DMA_CHAN    2
 
 class SDCard
 {

@@ -1,15 +1,14 @@
-#include "BT_a2db.h"
+#include "BT_a2dp.h"
 #include "esp_log.h"
 #include "freertos/timers.h"
-#include "nvs.h"
-#include "nvs_flash.h"
+
 #include <string.h>
 
 extern "C" {
 	#include "btc_av.h"
 }
 
-bool BT_a2db::ready = false;
+bool BT_a2dp::ready = false;
 
 /// handler for bluetooth stack enabled events
 static void bt_av_hdl_stack_evt(uint16_t event, void *p_param);
@@ -49,7 +48,17 @@ static TimerHandle_t s_tmr;
 static esp_a2d_source_data_cb_t data_callback;
 const char* bt_speaker_name;
 
-BT_a2db::BT_a2db(esp_a2d_source_data_cb_t callback)
+//Discovery
+static bool f_discover = false;
+static esp_a2d_found_devices_cb_t found_devices_cb = NULL;
+static bt_device_param found_devices[MAX_ADDRESSES];
+static uint8_t found_device_count = 0;
+
+//NVS
+static nvs_handle_t bt_nvs_handle = 0;
+static char nvs_name[] = "btnvs";
+
+BT_a2dp::BT_a2dp(esp_a2d_source_data_cb_t callback)
 {
 
     data_callback = callback;
@@ -57,11 +66,15 @@ BT_a2db::BT_a2db(esp_a2d_source_data_cb_t callback)
 
 	// Initialize NVS.
 	esp_err_t ret = nvs_flash_init();
+
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
 		ESP_ERROR_CHECK(nvs_flash_erase());
 		ret = nvs_flash_init();
 	}
+	
 	ESP_ERROR_CHECK( ret );
+
+	ESP_ERROR_CHECK( nvs_open(nvs_name, NVS_READWRITE, &bt_nvs_handle) );
 
 	ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 
@@ -137,24 +150,58 @@ static bool get_name_from_eir(uint8_t *eir, uint8_t *bdname, uint8_t *bdname_len
 }
 
 
+static bool hasAddress(esp_bd_addr_t address, uint8_t *name)
+{
+	for (int i = 0; i < found_device_count; i++)
+	{
+		if (found_devices[i].address[0] == address[0] && 
+			found_devices[i].address[1] == address[1] && 
+			found_devices[i].address[2] == address[2] && 
+			found_devices[i].address[3] == address[3] && 
+			found_devices[i].address[4] == address[4] && 
+			found_devices[i].address[5] == address[5])
+			{
+				return true;
+			}
+
+		
+	}
+
+	memcpy(found_devices[found_device_count].name, name, MAX_BT_NAME_LEN);
+	found_devices[found_device_count].address[0] = address[0];
+	found_devices[found_device_count].address[1] = address[1];
+	found_devices[found_device_count].address[2] = address[2];
+	found_devices[found_device_count].address[3] = address[3];
+	found_devices[found_device_count].address[4] = address[4];
+	found_devices[found_device_count].address[5] = address[5];
+	found_device_count++;
+	return false;
+}
+
 static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t *param)
 {
-	char bda_str[18];
+	char bda_str[MAX_BT_NAME_LEN];
 	uint32_t cod = 0;
 	int32_t rssi = -129; /* invalid value */
 	uint8_t *eir = NULL;
 	esp_bt_gap_dev_prop_t *p;
-	ESP_LOGI(BT_AV_TAG, "Scanned device: %s", bda2str(param->disc_res.bda, bda_str, 18));
+	bda2str(param->disc_res.bda, bda_str, MAX_BT_NAME_LEN);
+	
+	if (!f_discover)
+		ESP_LOGI(BT_AV_TAG, "Scanned device: %s", bda_str);
+
 	for (int i = 0; i < param->disc_res.num_prop; i++) {
 		p = param->disc_res.prop + i;
 		switch (p->type) {
 		case ESP_BT_GAP_DEV_PROP_COD:
 			cod = *(uint32_t *)(p->val);
-			ESP_LOGI(BT_AV_TAG, "--Class of Device: 0x%x", cod);
+			if (!f_discover)
+				ESP_LOGI(BT_AV_TAG, "--Class of Device: 0x%x", cod);
 			break;
 		case ESP_BT_GAP_DEV_PROP_RSSI:
 			rssi = *(int8_t *)(p->val);
-			ESP_LOGI(BT_AV_TAG, "--RSSI: %d", rssi);
+			if (!f_discover)
+				ESP_LOGI(BT_AV_TAG, "--RSSI: %d", rssi);
 			break;
 		case ESP_BT_GAP_DEV_PROP_EIR:
 			eir = (uint8_t *)(p->val);
@@ -174,11 +221,30 @@ static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t *param)
 	/* search for device named bt_speaker_name in its extended inqury response */
 	if (eir) {
 		get_name_from_eir(eir, s_peer_bdname, NULL);
-		ESP_LOGI(BT_AV_TAG, "Checking potential device, address %s, name %s", bda_str, s_peer_bdname);
+		if (!f_discover)
+			ESP_LOGI(BT_AV_TAG, "Checking potential device, address %s, name %s", bda_str, s_peer_bdname);
 		//nop
-		//if (strcmp((char *)s_peer_bdname, "ESP_SPEAKER") != 0) {
-		if (strcmp((char *)s_peer_bdname, bt_speaker_name) != 0) {
+
+		if (f_discover)
+		{
+			if (!hasAddress(param->disc_res.bda, s_peer_bdname))
+			{
+				ESP_LOGI(BT_AV_TAG, "Found a target device, address %s, name %s", bda_str, s_peer_bdname);
+				if (found_devices_cb)
+				{
+					found_devices_cb(found_devices, found_device_count);
+				}
+				//TODO: call callback to update display of found devices
+			}
 			return;
+		}
+		else
+		{				
+			//if (strcmp((char *)s_peer_bdname, "ESP_SPEAKER") != 0) {	
+			if (strcmp((char *)s_peer_bdname, bt_speaker_name) != 0) 
+			{
+				return;
+			}
 		}
 
 		ESP_LOGI(BT_AV_TAG, "Found a target device, address %s, name %s", bda_str, s_peer_bdname);
@@ -190,8 +256,10 @@ static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t *param)
 }
 
 
+
 void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
+	char bda_str[18];
 	switch (event) {
 	case ESP_BT_GAP_DISC_RES_EVT: {
 		filter_inquiry_scan_result(param);
@@ -200,6 +268,8 @@ void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 
 	//TODO: HERE is where we end up when a specific BT device is found. Here we can start to modify the code to take out the connect and put it in a separate function
 	//That uses the s_peer_bda (address) to connect. We can also remove the filter_inquiry_scan_result and use it to return all devices found.
+	//DONE:
+
 	case ESP_BT_GAP_DISC_STATE_CHANGED_EVT: {
 		if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) {
 			if (s_a2d_state == APP_AV_STATE_DISCOVERED) {
@@ -301,8 +371,8 @@ static void bt_av_hdl_stack_evt(uint16_t event, void *p_param)
 		esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 
 //TODO: Here we can start discovery or branch this off and connect directly.
-
-		if (s_peer_bda)
+//DONE:
+		if (!f_discover)
 		{
 			/* start device discovery */
 			ESP_LOGI(BT_AV_TAG, "Starting connecting to the device...");
@@ -454,7 +524,7 @@ static void bt_app_av_media_proc(uint16_t event, void *param)
 			if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_START &&
 					a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
 				ESP_LOGI(BT_AV_TAG, "a2dp media start successfully.");
-				BT_a2db::ready = true;
+				BT_a2dp::ready = true;
 				s_intv_cnt = 0;
 				s_media_state = APP_AV_MEDIA_STATE_STARTED;
 			} else {
@@ -685,33 +755,55 @@ bool init_bluetooth()
     return true;
 }
 
-bool BT_a2db::discover_bluetooth(const char * speaker_name)
+bool BT_a2dp::connect_bluetooth(const char * speaker_name)
 { 
+	f_discover = false;
 	bt_speaker_name = speaker_name;
 	return init_bluetooth();
 }
 
 
-bool BT_a2db::connect_bluetooth(esp_bd_addr_t speaker_address)
+bool BT_a2dp::connect_bluetooth(esp_bd_addr_t speaker_address)
 {
+	f_discover = false;
 	for (int i = 0; i < ESP_BD_ADDR_LEN; i++)
 	{
 		s_peer_bda[i] = speaker_address[i];
 	}
-	//memcpy(s_peer_bda, speaker_address, ESP_BD_ADDR_LEN);
+
 	return init_bluetooth();
 
 }
 
+bool BT_a2dp::discover_sinks(esp_a2d_found_devices_cb_t callback)
+{
 
-int BT_a2db::get_media_state()
+	found_devices_cb = callback;
+	f_discover = true;
+	found_device_count = 0;
+	return init_bluetooth();
+
+}
+
+void BT_a2dp::shut_down()
+{
+	esp_bt_gap_cancel_discovery();
+	// bt_app_task_shut_down();
+}
+
+int BT_a2dp::get_media_state()
 {
 	return s_media_state;
 }
 
-int BT_a2db::get_a2d_state()
+int BT_a2dp::get_a2d_state()
 {
 	return s_a2d_state;
+}
+
+nvs_handle_t BT_a2dp::get_nvs_handle()
+{
+	return bt_nvs_handle;
 }
 
 //------END BLUETOOTH-----
