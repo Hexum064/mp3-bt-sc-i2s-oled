@@ -16,8 +16,9 @@
 #include "kiss_fftr.h"
 #include <math.h>
 #include "esp_spiffs.h"
+#include "utilities.h"
+#include "button_handling.h"
 #include "rgb_led_displays.h"
-
 extern "C" {
 
 	#include "btc_av.h"
@@ -56,15 +57,14 @@ extern "C" {
 #define PAUSE_BUTTON 2
 #define PREVIOUS_BUTTON 1
 
-#define MAX_VOL 4096
-#define VOL_STEP (MAX_VOL / 16)
+
 //#define DEBUG
 
 
 
 #define SCROLL_HOLD 4
 
-#define MAX_DISPLAY_MODES 7
+
 
 #define NYAN_BASE_PATH "/nyan_data"
 #define NYAN_MP3_PATH "/nyan_data/Nyan3.mp3"
@@ -74,16 +74,12 @@ TaskHandle_t mp3TaskHandle = NULL;
 short buff0[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 short buff1[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 uint8_t buff_num = 0;
-float output_volume = MAX_VOL / 2;
+
 float prev_volume;
 bool initializing = false;
-bool playing = false;
-bool i2s_output = false;
-bool bt_enabled = true;
-bool bt_discovery_mode = false;
-bool nyan_mode = false;
+
 bool has_started = false;
-bool f_change_file = false;
+
 bool f_muted = false;
 bool sd_initialized = false;
 Output *output = NULL;
@@ -92,36 +88,12 @@ i2s_pin_config_t i2s_speaker_pins;
 int total_samples = 0;
 uint16_t current_sample_rate = 0;
 uint64_t mp3_run_time = 0;
-char * full_path;
-uint16_t full_path_len = 0;
-
-BT_a2dp *bt_control;
-uint8_t display_index = 0;
-
-char bt_discovery_mode_flag_key[] = "btd";
-char bt_sink_name_key[] = "btname";
-char bt_sink_addr_key[] = "btaddr_";
-//+ 1 for term char
-char bt_sink_name[MAX_BT_NAME_LEN + 1];
-uint8_t bt_sink_addr[6];
-
-bt_device_param *bt_discovered_devices;
-uint8_t bt_discovered_count = 0;
-uint8_t bt_device_list_index = 0;
-
-uint8_t nyan_hold = 0;
-uint8_t nyan_i = 0;
 
 esp_vfs_spiffs_conf_t spiffs_cfg;
 
 SSD1306_t oled_display;
 
 
-
-
-// static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len);
-
-// BT_a2db bt(bt_app_a2d_data_cb);
 
 void init_button_input()
 {
@@ -187,228 +159,99 @@ void init_display()
 	vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
-void display_nyan()
+
+void init_rgb_led_spi()
 {
-	//memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
 
-	if (nyan_hold % 2 == 0)
-	{
-		memcpy(rgb_led_spi_tx_buff, nyan_imgs[nyan_i], RGB_LED_BYTE_COUNT);
 
-		nyan_i++;
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = GPIO_NUM_23,
+        .miso_io_num = GPIO_NUM_NC,
+        .sclk_io_num = GPIO_NUM_19,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4000
+    };
+   	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH1));
+    spi_device_interface_config_t devcfg={
+        .mode = 0,          //SPI mode 0        
+		.clock_speed_hz = 800000, //Should be 800KHz
+        .spics_io_num = -1,
+        .queue_size = 1
+    };
 
-		if (nyan_i == 12)
-		{
-			nyan_i = 1;
-		}
-	}
+	printf("SPI add device: %d\n", spi_bus_add_device( SPI3_HOST, &devcfg, &rgb_led_spi_handle));
+
+	//Set this up to clear all the lights
+	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
+
+	rgb_led_spi_trans.length = RGB_LED_BYTE_COUNT * 8; //length in bits
+	rgb_led_spi_trans.tx_buffer = rgb_led_spi_tx_buff;
+	// trans.flags = SPI_TRANS_MODE_OCT;
+	 printf("SPI queue transmit: %d\n", spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY));	
+	//printf("SPI transmit: %d\n", spi_device_transmit(rgb_led_spi_handle, &rgb_led_spi_trans));	
+}
+
+void init_spiffs()
+{
+	spiffs_cfg = {
+		.base_path = NYAN_BASE_PATH,
+		.partition_label = NULL,
+		.max_files = 5,
+		.format_if_mount_failed = false
+	};	
+}
+
+
+void init_bt_device_info()
+{
+	size_t temp_len;
+	int get_name_res = nvs_get_str(bt_control->get_nvs_handle(), bt_sink_name_key, bt_sink_name, &temp_len);
+	uint8_t addr;
 	
+	bt_sink_addr_key[6] = '0';
+	printf("Reading addr 0: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[0] = addr;
 
-	nyan_hold++;
-	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
-}
+	bt_sink_addr_key[6] = '1';
+	printf("Reading addr 1: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[1] = addr;
 
-void toggle_play_pause()
-{
-	//Don't want to play or pause in this mode 
-	if (bt_discovery_mode)
+	bt_sink_addr_key[6] = '2';
+	printf("Reading addr 2: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[2] = addr;
+
+	bt_sink_addr_key[6] = '3';
+	printf("Reading addr 3: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[3] = addr;
+
+	bt_sink_addr_key[6] = '4';
+	printf("Reading addr 4: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[4] = addr;
+
+	bt_sink_addr_key[6] = '5';
+	printf("Reading addr 5: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
+	bt_sink_addr[5] = addr;
+
+	printf("Get results. Name: %d\n", get_name_res);
+
+	if (get_name_res != ESP_OK)
 	{
-		if (bt_discovered_count > 0)
-		{
-			
-			ESP_LOGI("main", "Selecting BT device %s, addr %02x:%02x:%02x:%02x:%02x:%02x\n", bt_discovered_devices[bt_device_list_index].name,
-				bt_discovered_devices[bt_device_list_index].address[0], bt_discovered_devices[bt_device_list_index].address[1], bt_discovered_devices[bt_device_list_index].address[2], 
-				bt_discovered_devices[bt_device_list_index].address[3], bt_discovered_devices[bt_device_list_index].address[4], bt_discovered_devices[bt_device_list_index].address[5]);
-			printf("Writing name: %d\n", nvs_set_str(bt_control->get_nvs_handle(), bt_sink_name_key, (char *)bt_discovered_devices[bt_device_list_index].name));
-			nvs_commit(bt_control->get_nvs_handle());
-			//printf("Writing addr: %d\n", nvs_set_blob(bt_control->get_nvs_handle(), bt_sink_addr_key, (uint8_t *)bt_discovered_devices[bt_device_list_index].address, 6));
-			//Having an issue with blob where I could not read it. Using a more heavy-handed approach
-			bt_sink_addr_key[6] = '0';
-			printf("Writing addr 0: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[0]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			bt_sink_addr_key[6] = '1';
-			printf("Writing addr 1: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[1]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			bt_sink_addr_key[6] = '2';
-			printf("Writing addr 2: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[2]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			bt_sink_addr_key[6] = '3';
-			printf("Writing addr 3: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[3]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			bt_sink_addr_key[6] = '4';
-			printf("Writing addr 4: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[4]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			bt_sink_addr_key[6] = '5';
-			printf("Writing addr 5: %d\n", nvs_set_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_discovered_devices[bt_device_list_index].address[5]));
-			nvs_commit(bt_control->get_nvs_handle());
-
-			printf("Restarting after bt device set.\n"); //testing
-			vTaskDelay(pdMS_TO_TICKS(100)); //testing
-
-			esp_restart();
-		}
-		return;
+		strcpy(bt_sink_name, BT_SINK_NOT_SELECTED_NAME);	
+		bt_enabled = false;			
 	}
-
-	playing = !playing;
-
-
-
-	printf(playing ? "Playing\n" : "Paused\n");
-}
-
-void toggle_output()
-{
-	if (bt_enabled)
-	{
-		i2s_output = !i2s_output;
-	}
-	else
-	{
-		i2s_output = true;
-	}
-}
-
-void volume_up()
-{
-	if (output_volume < MAX_VOL)
-	{
-		output_volume += VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}
-}
-
-void volume_down()
-{
-	if (output_volume > 0)
-	{
-		output_volume -= VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}		
-}
-
-void play_next_song()
-{
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
-	{
-		if (bt_device_list_index < bt_discovered_count - 1)
-		{
-			ESP_LOGI("main", "Going to next device.");
-			bt_device_list_index++;
-		}
-		return;
-	}
-
-	if (nyan_mode)
-	{
-		return;
-	}
-
-	ESP_LOGI("main", "Going to next file.");
-	FileNavi::goto_next_mp3();
-	//For display
-	full_path = FileNavi::get_current_full_name();
-	full_path_len = strlen(full_path);
-	//end for display	
-	f_change_file = true;
 
 }
 
-void play_previous_song()
+static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 {
-
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
+	bt_discovered_devices = devices;
+	bt_discovered_count = count;
+	for (uint8_t i = 0; i < count; i++)
 	{
-		if (bt_device_list_index > 0)
-		{
-			ESP_LOGI("main", "Going to previous device.");
-			bt_device_list_index--;
-		}
-		return;
+		printf("Found %s at address %02x:%02x:%02x:%02x:%02x:%02x\n", devices[i].name, devices[i].address[0], devices[i].address[1], devices[i].address[2], devices[i].address[3], devices[i].address[4], devices[i].address[5]);
 	}
-
-
-	if (nyan_mode)
-	{
-		return;
-	}	
-
-	ESP_LOGI("main", "Going to previous file.");
-	//TODO: if runtime < n number of seconds, go to start of song (just don't call goto_prev_mp3), else go to previous song
-	FileNavi::goto_prev_mp3();
-	//For display
-	full_path = FileNavi::get_current_full_name();
-	full_path_len = strlen(full_path);
-	//end for display	
-	f_change_file = true;
-
-}
-
-void cycle_display()
-{
-	if (nyan_mode)
-	{
-		return;
-	}	
-
-
-	if (display_index == MAX_DISPLAY_MODES - 1)
-	{
-		display_index = 0;
-	}
-	else
-	{
-		display_index++;
-	}
-}
-
-void toggle_bt_discovery_mode()
-{
-	printf("Toggling bt discovery mode\n");
-	nyan_mode = false;
-
-	if (!bt_discovery_mode)
-	{
-		nvs_set_u8(bt_control->get_nvs_handle(), bt_discovery_mode_flag_key, 1);
-		nvs_commit(bt_control->get_nvs_handle());
-	}
-
-	esp_restart();
-
-
-}
-
-void toggle_nyan_mode()
-{
-	printf("Toggling nyan display mode\n");
-	nyan_mode = !nyan_mode;
-	if (nyan_mode)
-	{
-		display_nyan();
-		
-	}
-	f_change_file = true; //trigger the mp3 decoder to switch 
-}
-
-void scroll_text(char * text, int str_len, int max_len, int start_pos, char * buffer)
-{
-	
-
-	for (int i = 0; i < max_len; i++)
-	{
-		if (i + start_pos > str_len - 1)
-			buffer[i] = ' ';
-		else
-			buffer[i] = text[i + start_pos];
-	}
-
+	return 0;
 }
 
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
@@ -643,55 +486,8 @@ void vButtonInput( void * pvParameters )
 	}
 }
 
-
-void update_front_display(short * buff)
-{
-
-
-	if (nyan_mode)
-	{
-		display_nyan();
-	}
-	else
-	{
-		switch (display_index)
-		{
-			case 0:
-				display_sins(buff);
-				break;
-			case 1:
-				display_combo_option_0();
-				break;
-			case 2:
-				display_combo_option_1();
-				break;
-			case 3:
-				display_combo_option_2();
-				break;
-			case 4:
-				display_combo_option_3();
-				break;
-			case 5:
-				display_fft(buff);
-				break;
-			default:
-				blank_display();
-				break;
-
-		}
-	}
-
-	
-	
-}
-
 void vMp3Decode( void * pvParameters )
 {
-
-
-
-
-
 	uint16_t sample_rate = 0;
 
 	int sample_len = 0;
@@ -1067,65 +863,11 @@ void vOLEDDisplayUpdate(void * pvParameters)
 }
 
 
-static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
-{
-	bt_discovered_devices = devices;
-	bt_discovered_count = count;
-	for (uint8_t i = 0; i < count; i++)
-	{
-		printf("Found %s at address %02x:%02x:%02x:%02x:%02x:%02x\n", devices[i].name, devices[i].address[0], devices[i].address[1], devices[i].address[2], devices[i].address[3], devices[i].address[4], devices[i].address[5]);
-	}
-	return 0;
-}
-
-
-void init_rgb_led_spi()
-{
-
-
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = GPIO_NUM_23,
-        .miso_io_num = GPIO_NUM_NC,
-        .sclk_io_num = GPIO_NUM_19,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000
-    };
-   	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH1));
-    spi_device_interface_config_t devcfg={
-        .mode = 0,          //SPI mode 0        
-		.clock_speed_hz = 800000, //Should be 800KHz
-        .spics_io_num = -1,
-        .queue_size = 1
-    };
-
-	printf("SPI add device: %d\n", spi_bus_add_device( SPI3_HOST, &devcfg, &rgb_led_spi_handle));
-
-	//Set this up to clear all the lights
-	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
-
-	rgb_led_spi_trans.length = RGB_LED_BYTE_COUNT * 8; //length in bits
-	rgb_led_spi_trans.tx_buffer = rgb_led_spi_tx_buff;
-	// trans.flags = SPI_TRANS_MODE_OCT;
-	 printf("SPI queue transmit: %d\n", spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY));	
-	//printf("SPI transmit: %d\n", spi_device_transmit(rgb_led_spi_handle, &rgb_led_spi_trans));	
-}
-
-void init_spiffs()
-{
-	spiffs_cfg = {
-		.base_path = NYAN_BASE_PATH,
-		.partition_label = NULL,
-		.max_files = 5,
-		.format_if_mount_failed = false
-	};	
-}
 
 extern "C" void app_main(void)
 {
 	uint8_t f_discovery_mode = 0;
-	size_t temp_len;
-	uint8_t addr;
+
 
 	initializing = true;
 	bt_enabled = true;
@@ -1150,42 +892,7 @@ extern "C" void app_main(void)
 	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 1024*2, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 1024*2, NULL, 1, NULL, 1);
 
-	int get_name_res = nvs_get_str(bt_control->get_nvs_handle(), bt_sink_name_key, bt_sink_name, &temp_len);
-	// int get_addr_res = nvs_get_blob(bt_control->get_nvs_handle(), bt_sink_addr_key, bt_sink_addr, &temp_len);
-
-	bt_sink_addr_key[6] = '0';
-	printf("Reading addr 0: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[0] = addr;
-
-	bt_sink_addr_key[6] = '1';
-	printf("Reading addr 1: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[1] = addr;
-
-	bt_sink_addr_key[6] = '2';
-	printf("Reading addr 2: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[2] = addr;
-
-	bt_sink_addr_key[6] = '3';
-	printf("Reading addr 3: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[3] = addr;
-
-	bt_sink_addr_key[6] = '4';
-	printf("Reading addr 4: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[4] = addr;
-
-	bt_sink_addr_key[6] = '5';
-	printf("Reading addr 5: %d\n", nvs_get_u8(bt_control->get_nvs_handle(), bt_sink_addr_key, &addr));
-	bt_sink_addr[5] = addr;
-
-	printf("Get results. Name: %d\n", get_name_res);
-
-	if (get_name_res != ESP_OK)
-		//|| get_addr_res != ESP_OK)
-	{
-		strcpy(bt_sink_name, BT_SINK_NOT_SELECTED_NAME);	
-		bt_enabled = false;			
-	}
-
+	init_bt_device_info();
 
 	init_rgb_led_spi();
 
@@ -1212,11 +919,9 @@ extern "C" void app_main(void)
 		esp_vfs_spiffs_register(&spiffs_cfg);
 
 		init_colors(pixel_colors);
-
 		
 		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 1024*2, NULL, configMAX_PRIORITIES - 5, NULL, 1);
 		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*17, NULL, 10, &mp3TaskHandle, 1);	
-
 
 		//We can skip BT startup if the sink device is not selected because the mcu will be reset before one is selected
 		if (bt_enabled)
@@ -1225,9 +930,8 @@ extern "C" void app_main(void)
 			memcpy(addr, bt_sink_addr, 6);
 			bt.connect_bluetooth(addr);
 		}
-
-
 	}
+	
 	initializing = false;
 	
 }

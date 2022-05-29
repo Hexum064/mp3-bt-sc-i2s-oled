@@ -1,3 +1,6 @@
+#ifndef RGB_LED_DISPLAYS_H
+#define RGB_LED_DISPLAYS_H
+
 #define LEFT_LED_COUNT 250
 #define RIGHT_LED_COUNT 252
 #define RGB_LED_COUNT (LEFT_LED_COUNT+RIGHT_LED_COUNT)
@@ -28,6 +31,8 @@ kiss_fftr_cfg st = kiss_fftr_alloc(FFT_SAMPLE_SIZE, 0, NULL, NULL);
 int16_t l_channel[FFT_SAMPLE_SIZE];
 int16_t r_channel[FFT_SAMPLE_SIZE];
 
+uint8_t nyan_hold = 0;
+uint8_t nyan_i = 0;
 
 
 
@@ -1310,8 +1315,6 @@ void init_colors(rgbVal * pixel_colors)
 void display_fft(short * buff)
 {
 	static int i;
-	static uint8_t bin_i = 0;
-	static uint8_t row = 0;	
 	static int32_t r_max = 0;
 	static int32_t l_max = 0;
 	static int32_t l_bins_r[FFT_BINS];
@@ -1829,3 +1832,26 @@ void blank_display()
 	memset(rgb_led_spi_tx_buff, 0, RGB_LED_BYTE_COUNT);
 	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
 }
+
+void display_nyan()
+{
+	//memset(rgb_led_spi_tx_buff, 32, RGB_LED_BYTE_COUNT);
+
+	if (nyan_hold % 2 == 0)
+	{
+		memcpy(rgb_led_spi_tx_buff, nyan_imgs[nyan_i], RGB_LED_BYTE_COUNT);
+
+		nyan_i++;
+
+		if (nyan_i == 12)
+		{
+			nyan_i = 1;
+		}
+	}
+	
+
+	nyan_hold++;
+	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
+}
+
+#endif //RGB_LED_DISPLAYS_H
