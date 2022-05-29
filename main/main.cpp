@@ -81,6 +81,7 @@ short buff1[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 uint8_t buff_num = 0;
 float output_volume = MAX_VOL / 2;
 float prev_volume;
+bool initializing = false;
 bool playing = false;
 bool i2s_output = false;
 bool bt_enabled = true;
@@ -89,6 +90,7 @@ bool nyan_mode = false;
 bool has_started = false;
 bool f_change_file = false;
 bool f_muted = false;
+bool sd_initialized = false;
 Output *output = NULL;
 int buff_pos = 0;
 i2s_pin_config_t i2s_speaker_pins;
@@ -189,7 +191,7 @@ void init_button_input()
 {
 	//Button input is expected to be a multipled 7 to 3 signal where the 3 is a binary number from 0 to 7. 0 represents no buttons and 1 - 7 represent button 1 through 7.
 	gpio_config_t io_conf = {
-		.pin_bit_mask = ((1ULL << BUTTON_BIT_0) | (1ULL << BUTTON_BIT_1) | (1ULL << BUTTON_BIT_2)),
+		.pin_bit_mask = ((1ULL << BUTTON_BIT_0) | (1ULL << BUTTON_BIT_1) | (1ULL << BUTTON_BIT_2) | (1ULL << PIN_NUM_CD)) ,
 		.mode = GPIO_MODE_INPUT,
 		.pull_up_en = GPIO_PULLUP_DISABLE,
 		.pull_down_en = GPIO_PULLDOWN_ENABLE,
@@ -487,6 +489,11 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	int shortLen = len >> 1;
 	//static uint16_t sample_rate = 0;
 
+	if (!gpio_get_level(PIN_NUM_CD))
+	{
+		playing = false;
+	}
+
 	if (!(playing) || i2s_output) // || !has_started)
 	{
 		//ESP_LOGI("Main", "waiting");
@@ -544,6 +551,10 @@ void vI2SOutput( void * pvParameters )
 
 	while (1)
 	{
+		if (!gpio_get_level(PIN_NUM_CD))
+		{
+			playing = false;
+		}
 
 		if (playing && i2s_output && has_started)
 		{
@@ -685,9 +696,18 @@ void vButtonInput( void * pvParameters )
 			held = false;
 		}
 
-	
+		//If the Card Detect goes low, it means the card was removed so it get's uninitialized
+		if (!gpio_get_level(PIN_NUM_CD))
+		{
+			sd_initialized = false;
+		}
 
-		
+		//if the sd card was not initialized but the card detect signal goes high, it means the card was inserted
+		//after startup so it's best to restart now.
+		if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing)
+		{
+			esp_restart();
+		}
 
 	
 		vTaskDelay(pdMS_TO_TICKS(25));
@@ -893,7 +913,7 @@ void display_fft(short * buff)
 	r_max >>= 12;
 
 	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3), vu_left[l_max], (RIGHT_LED_COUNT * 3) / 2);
-	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + (RIGHT_LED_COUNT * 3) / 2, vu_right[r_max], (RIGHT_LED_COUNT * 3) / 2);
+	memcpy(rgb_led_spi_tx_buff + (LEFT_LED_COUNT * 3) + (RIGHT_LED_COUNT * 3) / 2, vu_left[r_max], (RIGHT_LED_COUNT * 3) / 2);
 
 	spi_device_queue_trans(rgb_led_spi_handle, &rgb_led_spi_trans, portMAX_DELAY);
 
@@ -1001,39 +1021,39 @@ void display_sins(short * buff)
 		}
 		else if(r_val > 16384)
 		{
-			rgb_led_spi_tx_buff[0 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].g;
-			rgb_led_spi_tx_buff[1 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].r;
-			rgb_led_spi_tx_buff[2 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[6].b;
+			rgb_led_spi_tx_buff[0 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].g;
+			rgb_led_spi_tx_buff[1 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].r;
+			rgb_led_spi_tx_buff[2 + (1 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].b;
 		}
 		else if(r_val > 8192)
 		{
-			rgb_led_spi_tx_buff[0 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].g;
-			rgb_led_spi_tx_buff[1 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].r;
-			rgb_led_spi_tx_buff[2 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].b;	
+			rgb_led_spi_tx_buff[0 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].g;
+			rgb_led_spi_tx_buff[1 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].r;
+			rgb_led_spi_tx_buff[2 + (2 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].b;	
 		}
 		else if(r_val > -4096)
 		{
-			rgb_led_spi_tx_buff[0 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].g;
-			rgb_led_spi_tx_buff[1 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].r;
-			rgb_led_spi_tx_buff[2 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[4].b;		
+			rgb_led_spi_tx_buff[0 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].g;
+			rgb_led_spi_tx_buff[1 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].r;
+			rgb_led_spi_tx_buff[2 + (3 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].b;		
 		}
 		else if(r_val > -12288)
 		{
-			rgb_led_spi_tx_buff[0 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].g;
-			rgb_led_spi_tx_buff[1 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].r;
-			rgb_led_spi_tx_buff[2 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[2].b;		
+			rgb_led_spi_tx_buff[0 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].g;
+			rgb_led_spi_tx_buff[1 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].r;
+			rgb_led_spi_tx_buff[2 + (4 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[3].b;		
 		}
 		else if(r_val > -20480)
 		{
-			rgb_led_spi_tx_buff[0 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].g;
-			rgb_led_spi_tx_buff[1 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].r;
-			rgb_led_spi_tx_buff[2 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[1].b;				
+			rgb_led_spi_tx_buff[0 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].g;
+			rgb_led_spi_tx_buff[1 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].r;
+			rgb_led_spi_tx_buff[2 + (5 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[5].b;				
 		}
 		else
 		{
-			rgb_led_spi_tx_buff[0 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].g;
-			rgb_led_spi_tx_buff[1 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].r;
-			rgb_led_spi_tx_buff[2 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[0].b;	
+			rgb_led_spi_tx_buff[0 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].g;
+			rgb_led_spi_tx_buff[1 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].r;
+			rgb_led_spi_tx_buff[2 + (6 * 3) + (row_i * 21) + (LEFT_LED_COUNT * 3)] = pixel_colors[7].b;	
 		}		
 	}
 
@@ -1651,24 +1671,32 @@ void vOLEDDisplayUpdate(void * pvParameters)
 			}
 			else
 			{
-				scroll_pos++;
-
-				if (scroll_pos > full_path_len - MAX_CHARS)	
+				if (!gpio_get_level(PIN_NUM_CD))
+				{	
+					sprintf(str_buff, "No SD Card     ");
+				}	
+				else
 				{
-					//use this to hold the scrolling of the file name for a moment before returning to the beginning
-					if (scroll_hold < SCROLL_HOLD && scroll_pos > 0)
+					scroll_pos++;
+
+					if (scroll_pos > full_path_len - MAX_CHARS)	
 					{
-						scroll_pos--;			
-						scroll_hold++;
+						//use this to hold the scrolling of the file name for a moment before returning to the beginning
+						if (scroll_hold < SCROLL_HOLD && scroll_pos > 0)
+						{
+							scroll_pos--;			
+							scroll_hold++;
+						}
+						else 
+						{
+							scroll_hold = 0;
+							scroll_pos = 0;
+						}
 					}
-					else 
-					{
-						scroll_hold = 0;
-						scroll_pos = 0;
-					}
+
+					scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, str_buff);	
 				}
 
-				scroll_text(full_path, full_path_len, MAX_CHARS, scroll_pos, str_buff);	
 				ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
 			}
 
@@ -1750,7 +1778,7 @@ extern "C" void app_main(void)
 
 	//i2s_output = true;
 
-	
+	initializing = true;
 	bt_enabled = true;
 	bt_discovery_mode = false;
 
@@ -1821,7 +1849,15 @@ extern "C" void app_main(void)
 	{		
 
 		SDCard* sdc = new SDCard();
+
+		if (!gpio_get_level(PIN_NUM_CD))
+		{
+			initializing = false;
+			return;	
+		}
+
 		sdc->init();
+		sd_initialized = true;
 
 		init_spiffs();
 		esp_vfs_spiffs_register(&spiffs_cfg);
@@ -1843,7 +1879,7 @@ extern "C" void app_main(void)
 
 
 	}
-
+	initializing = false;
 
 
 	//xTaskCreate(vFFT_FrontDisplay, "FFT_and_FRONT", 1024*32, NULL, 2, NULL);
