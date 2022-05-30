@@ -1,3 +1,7 @@
+//TODO: Add normal/repeat on long-hold for play/pause button
+//TODO: Fix found BT device list scrolling
+//TODO: Add firmware version to startup screen
+
 #define FIXED_POINT 16
 
 #include <stdio.h>
@@ -280,7 +284,7 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	if (!(playing) || i2s_output) // || !has_started)
 	{
 		//ESP_LOGI("Main", "waiting");
-		//TODO: Harder this code to ensure it can't throw an exception
+
 		if (data)
 		{
 			memset(data, 0, len);

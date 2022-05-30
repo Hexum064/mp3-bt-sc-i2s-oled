@@ -234,7 +234,7 @@ static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t *param)
 				{
 					found_devices_cb(found_devices, found_device_count);
 				}
-				//TODO: call callback to update display of found devices
+			
 			}
 			return;
 		}
