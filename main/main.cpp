@@ -169,7 +169,7 @@ void init_rgb_led_spi()
    	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH1));
     spi_device_interface_config_t devcfg={
         .mode = 0,          //SPI mode 0        
-		.clock_speed_hz = 800000, //Should be 800KHz
+		.clock_speed_hz = 640000, //Should be 800KHz, slowed down because our spi to async RGB is too slow
         .spics_io_num = -1,
         .queue_size = 1
     };
