@@ -10,9 +10,13 @@ I2SOutput::I2SOutput(i2s_port_t i2s_port, i2s_pin_config_t &i2s_pins) : Output(i
 void I2SOutput::start(int sample_rate)
 {
     if (installed)
+    {
+        installed = false;
         i2s_driver_uninstall(m_i2s_port);
+        //i2s_stop(m_i2s_port);
+    }
 
-    installed = false;
+    
 
     // i2s config for writing both channels of I2S
     i2s_config_t i2s_config {
@@ -29,6 +33,12 @@ void I2SOutput::start(int sample_rate)
         .fixed_mclk = 0 };
     //install and start i2s driver
     ESP_LOGI("I2SOutput", "Installing driver");
+    if (installed)
+    {
+        installed = false;
+        //i2s_driver_uninstall(m_i2s_port);
+        i2s_stop(m_i2s_port);
+    }    
     i2s_driver_install(m_i2s_port, &i2s_config, 0, NULL);
     installed = true;
     // set up the i2s pins

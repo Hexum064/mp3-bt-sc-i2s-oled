@@ -1,6 +1,8 @@
 //TODO: Add normal/repeat on long-hold for play/pause button
 //TODO: Fix found BT device list scrolling
 //TODO: Add firmware version to startup screen
+//TODO: Fix stars in right-side nyan
+//TODO: Reset BT audio on "ERROR btc_media_aa_prep_sbc_2_send no buffer TxCnt" error
 
 #define FIXED_POINT 16
 
@@ -41,9 +43,7 @@ extern "C" {
 #define I2S_SPEAKER_LEFT_RIGHT_CLOCK GPIO_NUM_5
 #define I2S_SPEAKER_SERIAL_DATA GPIO_NUM_18
 
-#define BUTTON_BIT_0 GPIO_NUM_2
-#define BUTTON_BIT_1 GPIO_NUM_16
-#define BUTTON_BIT_2 GPIO_NUM_17
+
 
 #define DISPLAY_SDA	GPIO_NUM_21
 #define DISPLAY_SCL GPIO_NUM_22
@@ -53,16 +53,7 @@ extern "C" {
 
 #define OLED_DISP_INT 250
 
-#define SHORT_BUTTON_PUSH 50000ULL
-#define LONG_BUTTON_HOLD 750000ULL
 
-#define VOL_UP_BUTTON 7
-#define VOL_DOWN_BUTTON 6
-#define DISPLAY_BUTTON 5
-#define OUTPUT_BUTTON 4
-#define NEXT_BUTTON 3
-#define PAUSE_BUTTON 2
-#define PREVIOUS_BUTTON 1
 
 #define SCROLL_HOLD 4
 
@@ -71,21 +62,21 @@ extern "C" {
 
 #define ADC_BATT_ATTEN ADC_ATTEN_DB_6
 
+#define FIRMWARE_VERSION "Firmware v 1.0  "
+
 TaskHandle_t mp3TaskHandle = NULL;
 
 short buff0[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 short buff1[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 uint8_t buff_num = 0;
-
-float prev_volume;
-bool initializing = false;
+int buff_pos = 0;
 
 bool has_started = false;
 
 bool f_muted = false;
-bool sd_initialized = false;
+
 Output *output = NULL;
-int buff_pos = 0;
+
 i2s_pin_config_t i2s_speaker_pins;
 
 esp_vfs_spiffs_conf_t spiffs_cfg;
@@ -153,7 +144,8 @@ void init_display()
 	ssd1306_display_text(&oled_display, 1, foxs_random, 12, false);
 	ssd1306_display_text(&oled_display, 2, access_memories, 16, false);
 	ssd1306_display_text(&oled_display, 3, dc30, 4, false);
-
+	ssd1306_display_text(&oled_display, 7, FIRMWARE_VERSION, 16, false);
+	
 	vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
@@ -380,125 +372,13 @@ void vI2SOutput( void * pvParameters )
 
 void vButtonInput( void * pvParameters )
 {
-	uint8_t input = 0;
-	uint8_t last_input = 0;
-	bool held = false;
-	uint64_t start_time = 0;
-
 	init_button_input();
-
-	for( ;; )
+	while(1)
 	{
-		input = gpio_get_level(BUTTON_BIT_0) | (gpio_get_level(BUTTON_BIT_1) << 1) | (gpio_get_level(BUTTON_BIT_2) << 2);
-
-		if (input) // if input is not 0
-		{
-			if (last_input != input && !(held))
-			{
-				last_input = input;
-				start_time = esp_timer_get_time();
-				printf("button down: %d\n", input);
-			}
-			else 
-			{
-				if (esp_timer_get_time() - start_time > LONG_BUTTON_HOLD && !(held)) //Long Hold
-				{
-					printf("button long down: %d\n", last_input);
-					
-					last_input = 0;
-					start_time = 0;
-					held = true;					
-					
-					switch(input)
-					{
-						case PREVIOUS_BUTTON:						
-							break; //do nothing intentionally
-						case PAUSE_BUTTON:													
-							break; //do nothing intentionally
-						case NEXT_BUTTON:						
-							break; //do nothing intentionally
-						case OUTPUT_BUTTON:		
-							//This should reset the mcu so no need to do anything else
-							toggle_bt_discovery_mode();
-							
-							break;
-						case DISPLAY_BUTTON:					
-							toggle_nyan_mode();
-							break;
-						case VOL_DOWN_BUTTON:
-							volume_down();			
-							held = false;
-							last_input = input;
-							start_time = esp_timer_get_time();
-							break;
-						case VOL_UP_BUTTON:
-							volume_up();
-							held = false;
-							last_input = input;
-							start_time = esp_timer_get_time();
-							break;							
-					}
-
-
-				}
-			}
-		}
-		else
-		{
-			//check if we were pushing a button and clear everything
-
-			if (last_input && esp_timer_get_time() - start_time > SHORT_BUTTON_PUSH) // if a button was being pushed
-			{
-				printf("button short up: %d\n", last_input);
-
-				switch(last_input)
-				{
-					case PREVIOUS_BUTTON:
-						play_previous_song();
-						break;
-					case PAUSE_BUTTON:
-						toggle_play_pause();
-						break;
-					case NEXT_BUTTON:
-						play_next_song();
-						break;
-					case OUTPUT_BUTTON:
-						toggle_output();
-						break;
-					case DISPLAY_BUTTON:
-						cycle_display();
-						break;
-					case VOL_DOWN_BUTTON:
-						volume_down();						
-						break;
-					case VOL_UP_BUTTON:
-						volume_up();
-						break;							
-				}
-
-			}
-
-			last_input = 0;
-			start_time = 0;
-			held = false;
-		}
-
-		//If the Card Detect goes low, it means the card was removed so it get's uninitialized
-		if (!gpio_get_level(PIN_NUM_CD))
-		{
-			sd_initialized = false;
-		}
-
-		//if the sd card was not initialized but the card detect signal goes high, it means the card was inserted
-		//after startup so it's best to restart now.
-		if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing)
-		{
-			esp_restart();
-		}
-
-	
+		handle_button_input();
 		vTaskDelay(pdMS_TO_TICKS(25));
 	}
+	
 }
 
 void vMp3Decode( void * pvParameters )
@@ -507,6 +387,7 @@ void vMp3Decode( void * pvParameters )
 
 	int sample_len = 0;
 	short * fillBuff;
+	uint8_t pass = 0;
 
 	FileNavi::goto_first_mp3();
 	full_path = FileNavi::get_current_full_name();
@@ -552,7 +433,7 @@ void vMp3Decode( void * pvParameters )
 			}
 
 
-
+			pass = 0;
 			fillBuff = buff1;
 
 			if (buff_num) 
@@ -573,87 +454,52 @@ void vMp3Decode( void * pvParameters )
 				update_front_display(fillBuff);
 			}
 			
-			player->decodeSample(fillBuff, &sample_len);
-			total_samples += sample_len;
-
-			if (sample_len > 0 && !has_started) //make sure this only happens once
+			while(pass < 2)
 			{
-	
-				total_samples = 0;
-				has_started = true;
-				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
-				output->start(player->info.hz);
-				current_sample_rate = player->info.hz;
-			
-				ESP_LOGI("main", "i2s output started");
+				player->decodeSample(fillBuff, &sample_len);
+				total_samples += sample_len;
 
-				if (sample_rate != current_sample_rate)
+				if (sample_len > 0 && !has_started) //make sure this only happens once
 				{
-					sample_rate = current_sample_rate;
-
-					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
-					{
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(100));
-						// printf("Media state: %d\n", bt_control->get_media_state());
-						// printf("a2d state: %d\n", bt_control->get_a2d_state());
-						set_freq(current_sample_rate);
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
-					}
-					else
-					{
-						set_freq(current_sample_rate);
-					}
-					
-				}
-				f_muted = false;
-			}
-
-			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
-			total_samples += sample_len;
-
-
-
-			if (sample_len > 0 && !has_started) //make sure this only happens once
-			{
-
-				total_samples = 0;
-				has_started = true;
-				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
-				output->start(player->info.hz);
-				current_sample_rate = player->info.hz;
+		
+					total_samples = 0;
+					has_started = true;
+					ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
+					output->start(player->info.hz);
+					current_sample_rate = player->info.hz;
 				
-				ESP_LOGI("main", "i2s output started");
+					ESP_LOGI("main", "i2s output started");
 
-
-				if (sample_rate != current_sample_rate)
-				{
-					sample_rate = current_sample_rate;
-
-					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+					if (sample_rate != current_sample_rate)
 					{
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(100));
-						set_freq(current_sample_rate);
-						// printf("Media state: %d\n", bt_control->get_media_state());
-						// printf("a2d state: %d\n", bt_control->get_a2d_state());
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+						sample_rate = current_sample_rate;
+
+						if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+						{
+							esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
+							vTaskDelay(pdMS_TO_TICKS(100));
+							// printf("Media state: %d\n", bt_control->get_media_state());
+							// printf("a2d state: %d\n", bt_control->get_a2d_state());
+							set_freq(current_sample_rate);
+							esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+						}
+						else
+						{
+							set_freq(current_sample_rate);
+						}
+						
 					}
-					else
-					{
-						set_freq(current_sample_rate);
-					}
-					
+					f_muted = false;
 				}
-				f_muted = false;
-			}
 
+				pass++;
+			}
 
 
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
 			{
-				if (!nyan_mode)
+				if (!nyan_mode && !repeat_mode)
 				{
 					ESP_LOGI("main", "Done with current song. Going to next file.");
 					FileNavi::goto_next_mp3();
@@ -668,6 +514,7 @@ void vMp3Decode( void * pvParameters )
 
 		}
 
+		
 		player->dispose();
 		
 	}
@@ -700,6 +547,17 @@ void oled_display_normal_mode()
 	
 	ssd1306_display_text(&oled_display, 1, disp_buff, 16, false);
 
+	if (repeat_mode)
+	{
+		sprintf(disp_buff, "Normal Play Mode");
+	}
+	else
+	{
+		sprintf(disp_buff, "Repeat Song Mode");
+	}
+
+	ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
+
 	disp_buff[0] = '\0';
 
 	if (i2s_output)
@@ -711,7 +569,7 @@ void oled_display_normal_mode()
 		sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
 	}
 	
-	ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
+	ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
 
 	disp_buff[0] = '\0';
 
@@ -725,8 +583,8 @@ void oled_display_normal_mode()
 		sprintf(disp_buff, "BT Connected to:");	
 	}
 	
-	ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
-	ssd1306_display_text(&oled_display, 4, bt_sink_name, 16, false);
+	ssd1306_display_text(&oled_display, 4, disp_buff, 16, false);
+	ssd1306_display_text(&oled_display, 5, bt_sink_name, 16, false);
 	
 	if (nyan_mode)
 	{
@@ -738,10 +596,10 @@ void oled_display_normal_mode()
 		
 	}
 	
-	ssd1306_display_text(&oled_display, 5, disp_buff, 16, false);
+	ssd1306_display_text(&oled_display, 6, disp_buff, 16, false);
 
 	sprintf(disp_buff, "Battery %d%%    ", get_batt_percent());
-	ssd1306_display_text(&oled_display, 6, disp_buff, 16, false);
+	ssd1306_display_text(&oled_display, 7, disp_buff, 16, false);
 	
 }	
 
