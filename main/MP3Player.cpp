@@ -22,24 +22,32 @@ int decoded = 0;
 int bytes_read = 0;
 mp3dec_t mp3d = {};
 
+// MP3Player::MP3Player(const char *file)
+// {
+//    mp3_player_init(file , 0);
+
+// }
 
 
-MP3Player::MP3Player(const char *file)
+MP3Player::MP3Player(const char *file, long file_start_pos)
 {
     // this assumes that you have uploaded the mp3 file to the SPIFFS
     ESP_LOGI("MP3Player", "Opening file %s", file);
     fp = fopen(file, "r");
+    fseek(fp, file_start_pos, SEEK_SET);
     if (!fp)
     {
         ESP_LOGE("MP3Player", "Failed to open file");
         return;
     }
 
+    is_output_started = false;
     buffered = 0;
     decoded = 0;
     to_read = MP3_BUFFER_SIZE;
 
 }
+
 
 void MP3Player::dispose()
 {
@@ -51,6 +59,11 @@ void MP3Player::dispose()
         ESP_LOGI("MP3Player", "Closing file");
         fclose(fp);
     }
+}
+
+long MP3Player::get_file_pos()
+{
+    return ftell(fp);
 }
 
 mp3d_sample_t * MP3Player::decodeSample(int * sample_len)

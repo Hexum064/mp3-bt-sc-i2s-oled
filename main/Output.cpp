@@ -5,12 +5,14 @@
 
 static const char *TAG = "OUT";
 
+
 // number of frames to try and send at once (a frame is a left and right sample)
 const int NUM_FRAMES_TO_SEND = 256;
 
 Output::Output(i2s_port_t i2s_port) : m_i2s_port(i2s_port)
 {
   frames_buffer = (int16_t *)malloc(2 * sizeof(int16_t) * NUM_FRAMES_TO_SEND);
+  // started = false;
 }
 
 Output::~Output()
@@ -18,8 +20,11 @@ Output::~Output()
   free(frames_buffer);
 }
 
+
+
 void Output::stop()
 {
+  started = false;
   // stop the i2S driver
   i2s_stop(m_i2s_port);
   i2s_driver_uninstall(m_i2s_port);
@@ -27,6 +32,13 @@ void Output::stop()
 
 void Output::write(int16_t *samples, int frames)
 {
+
+
+
+  if (!started)
+  {
+    return;
+  }
   // this will contain the prepared samples for sending to the I2S device
   int frame_index = 0;
   while (frame_index < frames)
@@ -44,7 +56,10 @@ void Output::write(int16_t *samples, int frames)
     }
     // write data to the i2s peripheral - this will block until the data is sent
     size_t bytes_written = 0;
+
+
     i2s_write(m_i2s_port, frames_buffer, frames_to_send * sizeof(int16_t) * 2, &bytes_written, portMAX_DELAY);
+
     if (bytes_written != frames_to_send * sizeof(int16_t) * 2)
     {
       ESP_LOGE(TAG, "Did not write all bytes");

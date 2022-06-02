@@ -3,29 +3,11 @@
 
 #include "rgb_led_displays.h"
 #include "utilities.h"
+#include "defines.h"
 
-#define MAX_VOL 4096
-#define VOL_STEP (MAX_VOL / 16)
-#define MAX_DISPLAY_MODES 7
-#define SECONDS_TILL_RESET_CURRENT_SONG 2
-
-#define BUTTON_BIT_0 GPIO_NUM_2
-#define BUTTON_BIT_1 GPIO_NUM_16
-#define BUTTON_BIT_2 GPIO_NUM_17
-
-#define SHORT_BUTTON_PUSH 50000ULL
-#define LONG_BUTTON_HOLD 750000ULL
-
-#define VOL_UP_BUTTON 7
-#define VOL_DOWN_BUTTON 6
-#define DISPLAY_BUTTON 5
-#define OUTPUT_BUTTON 4
-#define NEXT_BUTTON 3
-#define PAUSE_BUTTON 2
-#define PREVIOUS_BUTTON 1
 
 bool playing = false;
-bool i2s_output = false;
+bool i2s_output = true;
 bool bt_enabled = true;
 bool bt_discovery_mode = false;
 bool nyan_mode = false;
@@ -34,9 +16,8 @@ bool repeat_mode = false;
 bt_device_param *bt_discovered_devices;
 uint8_t bt_discovered_count = 0;
 uint8_t bt_device_list_index = 0;
-BT_a2dp *bt_control;
 uint8_t display_index = 0;
-
+BT_a2dp *bt_control;
 char bt_discovery_mode_flag_key[] = "btd";
 char bt_sink_name_key[] = "btname";
 char bt_sink_addr_key[] = "btaddr_";
@@ -52,6 +33,9 @@ uint16_t full_path_len = 0;
 bool f_change_file = false;
 bool initializing = false;
 bool sd_initialized = false;
+
+TaskHandle_t mp3TaskHandle = NULL;
+
 
 void toggle_play_pause()
 {
@@ -245,6 +229,7 @@ void toggle_nyan_mode()
 		
 	}
 	f_change_file = true; //trigger the mp3 decoder to switch 
+    vTaskResume(mp3TaskHandle);	
 }
 
 void toggle_normal_repeat_mode()
@@ -335,12 +320,18 @@ void handle_button_input()
                         toggle_nyan_mode();
                         break;
                     case VOL_DOWN_BUTTON:
-                        volume_down();			
+                        volume_down();	
+                        volume_down();
+                        volume_down();
+                        volume_down();		
                         held = false;
                         last_input = input;
                         start_time = esp_timer_get_time();
                         break;
                     case VOL_UP_BUTTON:
+                        volume_up();
+                        volume_up();
+                        volume_up();
                         volume_up();
                         held = false;
                         last_input = input;

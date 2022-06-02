@@ -24,7 +24,8 @@ idf_component_register(
         "M:/esp-idf-extension/esp-idf/components/bt/common/btc/include"
         "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/include"
         "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/profile/std/a2dp/include"
-        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/external/sbc/encoder/include")
+        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/external/sbc/encoder/include"
+        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/common/include/common")
 
 # Create a SPIFFS image from the contents of the 'nyan_data' directory
 # that fits the partition named 'storage'. FLASH_IN_PROJECT indicates that

@@ -1,17 +1,23 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
-#define ADC_BATT_CHANNEL ADC1_CHANNEL_0
-#define BATT_100 2000	//approx 6v with a 100K/22K divider
-#define BATT_0	1500	//approx 4.1v with a 100K/22K divider
-#define BATT_ADC_RANGE (BATT_100 - BATT_0)
-#define BATT_ROLLING_AVG_CNT 50
+
+
+#include "defines.h"
 
 int total_samples = 0;
 uint16_t current_sample_rate = 0;
 
 uint16_t batt_vals[BATT_ROLLING_AVG_CNT];
 uint8_t batt_vals_index = 0;
+
+
+
+extern "C" 
+{
+
+	#include "btc_av.h"
+}
 
 void scroll_text(char * text, int str_len, int max_len, int start_pos, char * buffer)
 {
@@ -71,5 +77,22 @@ uint8_t get_batt_percent()
 	}    
 
     return adc_batt_val;
+}
+
+void update_bt_sample_rate(BT_a2dp *bt_control)
+{
+	if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+	{
+		esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
+		vTaskDelay(pdMS_TO_TICKS(100));
+		// printf("Media state: %d\n", bt_control->get_media_state());
+		// printf("a2d state: %d\n", bt_control->get_a2d_state());
+		set_freq(current_sample_rate);
+		esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+	}
+	else
+	{
+		set_freq(current_sample_rate);
+	}	
 }
 #endif //UTILITIES_H
