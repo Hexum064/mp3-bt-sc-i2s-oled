@@ -29,6 +29,7 @@ float output_volume = MAX_VOL / 2;
 
 char * full_path;
 uint16_t full_path_len = 0;
+int scroll_pos = 0;
 
 bool f_change_file = false;
 bool initializing = false;
@@ -105,24 +106,6 @@ void toggle_output()
 
 void volume_up()
 {
-	if (output_volume < MAX_VOL)
-	{
-		output_volume += VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}
-}
-
-void volume_down()
-{
-	if (output_volume > 0)
-	{
-		output_volume -= VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}		
-}
-
-void play_next_song()
-{
 	//Don't want to change songs in this mode 
 	if (bt_discovery_mode)
 	{
@@ -133,6 +116,36 @@ void play_next_song()
 		}
 		return;
 	}
+
+	if (output_volume < MAX_VOL)
+	{
+		output_volume += VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}
+}
+
+void volume_down()
+{
+	//Don't want to change songs in this mode 
+	if (bt_discovery_mode)
+	{
+		if (bt_device_list_index > 0)
+		{
+			ESP_LOGI("main", "Going to previous device.");
+			bt_device_list_index--;
+		}
+		return;
+	}
+
+	if (output_volume > 0)
+	{
+		output_volume -= VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}		
+}
+
+void play_next_song()
+{
 
 	if (nyan_mode)
 	{
@@ -146,23 +159,12 @@ void play_next_song()
 	full_path_len = strlen(full_path);
 	//end for display	
 	f_change_file = true;
+	scroll_pos = 0;
 
 }
 
 void play_previous_song()
 {
-
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
-	{
-		if (bt_device_list_index > 0)
-		{
-			ESP_LOGI("main", "Going to previous device.");
-			bt_device_list_index--;
-		}
-		return;
-	}
-
 
 	if (nyan_mode)
 	{
@@ -182,7 +184,7 @@ void play_previous_song()
 	full_path_len = strlen(full_path);
 	//end for display	
 	f_change_file = true;
-
+	scroll_pos = 0;
 }
 
 void cycle_display()

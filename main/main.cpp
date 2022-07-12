@@ -521,7 +521,7 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	char header[45];
 	char str_buff[MAX_CHARS];
 	int scroll_hold = 0;
-	int scroll_pos = 0;
+	
 
 
 	init_display();
