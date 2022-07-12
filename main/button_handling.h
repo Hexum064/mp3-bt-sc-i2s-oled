@@ -284,6 +284,12 @@ void handle_button_input()
 
     input = gpio_get_level(BUTTON_BIT_0) | (gpio_get_level(BUTTON_BIT_1) << 1) | (gpio_get_level(BUTTON_BIT_2) << 2);
 
+#ifdef INVERSE_BUTTON_INPUT
+
+	input = (~input) & 0x07;
+
+#endif
+
     if (input) // if input is not 0
     {
         if (last_input != input && !(held))
@@ -391,7 +397,7 @@ void handle_button_input()
 
     //if the sd card was not initialized but the card detect signal goes high, it means the card was inserted
     //after startup so it's best to restart now.
-    if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing)
+    if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing && !bt_discovery_mode)
     {
         esp_restart();
     }
