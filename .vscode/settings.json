@@ -53,7 +53,8 @@
         "btc_av_api.h": "c",
         "*.inc": "cpp",
         "cmath": "cpp",
-        "btc_task.h": "c"
+        "btc_task.h": "c",
+        "dc30_buff.h": "c"
     },
     "idf.flashType": "UART",
     "cSpell.words": [

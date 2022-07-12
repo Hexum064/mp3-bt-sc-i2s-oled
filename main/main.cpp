@@ -72,7 +72,7 @@ void init_audio_out()
 {
 	// i2s speaker pins
 i2s_pin_config_t i2s_speaker_pins = {
-	.mck_io_num = I2S_PIN_NO_CHANGE,
+	.mck_io_num = I2S_SPEAKER_MASTER_CLOCK,
     .bck_io_num = I2S_SPEAKER_SERIAL_CLOCK,
     .ws_io_num = I2S_SPEAKER_LEFT_RIGHT_CLOCK,
     .data_out_num = I2S_SPEAKER_SERIAL_DATA,
@@ -134,7 +134,7 @@ void init_rgb_led_spi(spi_dma_chan_t channel)
    	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, channel));
     spi_device_interface_config_t devcfg={
         .mode = 0,          //SPI mode 0        
-		.clock_speed_hz = 640000, //Should be 800KHz, slowed down because our spi to async RGB is too slow
+		.clock_speed_hz = 680000, //Should be 800KHz, slowed down because our spi to async RGB is too slow
         .spics_io_num = -1,
         .queue_size = 1
     };
@@ -296,6 +296,7 @@ void vI2SOutput( void * pvParameters )
 {	
 	init_audio_out();
 	short * buff = buff0;
+	uint16_t i = 0;
 
 	ESP_LOGI("main", "Starting I2S task");
 
@@ -322,10 +323,20 @@ void vI2SOutput( void * pvParameters )
 			//ESP_LOGI("main", "Outputting I2S");
 			output->set_volume(f_muted ? 0 : output_volume / MAX_VOL);
 			
+			//Left Right tests
+
+
+			for (i = 0; i < MINIMP3_MAX_SAMPLES_PER_FRAME; i++)
+			{
+				//buff[i * 2] = 0; //left
+				//buff[1 + (i * 2)] = 0; //right
+			}
 
 			if (!f_change_file) //one last check. This really should be made atomic
-			{
+			{	
+				// printf("Writing\n");
 				output->write(buff, MINIMP3_MAX_SAMPLES_PER_FRAME);
+				// printf("Output written\n");
 			}
 
 
@@ -342,6 +353,7 @@ void vI2SOutput( void * pvParameters )
 		}
 		else
 		{
+			// printf("i2s skipped\n");
 			//Keep the WDT happy
 			vTaskDelay(pdMS_TO_TICKS(100));
 		}
@@ -415,6 +427,7 @@ void vMp3Decode( void * pvParameters )
 			//Only pause after we have started the output (decoding has actually happened)
 			if (player->is_output_started)
 			{
+				// printf("suspending\n");
 				vTaskSuspend( mp3TaskHandle );
 			}
 
@@ -441,6 +454,7 @@ void vMp3Decode( void * pvParameters )
 			
 			while(pass < 2)
 			{
+				// printf("decoding\n");
 				player->decodeSample(fillBuff + (MINIMP3_MAX_SAMPLES_PER_FRAME * pass), &sample_len);
 				total_samples += sample_len;
 
@@ -628,8 +642,8 @@ extern "C" void app_main(void)
 		nvs_commit(bt_control->get_nvs_handle());		
 	}
 
-	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2500, NULL, 1, &buttonsTaskHandle, 1);
-	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 2500, NULL, 1, &oledTaskHandle, 1);
+	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2250, NULL, 1, &buttonsTaskHandle, 1);
+	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 2250, NULL, 1, &oledTaskHandle, 1);
 
 	init_bt_device_info();
 
@@ -649,6 +663,7 @@ extern "C" void app_main(void)
 		if (!gpio_get_level(PIN_NUM_CD))
 		{
 			initializing = false;
+			printf("SD Card not detected. Haulting init.");
 			return;	
 		}
 		
@@ -660,14 +675,23 @@ extern "C" void app_main(void)
 
 		init_colors(pixel_colors);
 		
-		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2500, NULL, configMAX_PRIORITIES - 5, &i2sTaskHandle, 0);
-		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 17500, NULL, 10, &mp3TaskHandle, 1);	
+		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2250, NULL, configMAX_PRIORITIES - 5, &i2sTaskHandle, 0);
+		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 17250, NULL, 10, &mp3TaskHandle, 1);	
 
 		//We can skip BT startup if the sink device is not selected because the mcu will be reset before one is selected
 		if (bt_enabled)
 		{
+			//FOR TESTING: address 42:fa:bf:75:ca:26, name Q50
 			esp_bd_addr_t addr;
+			
 			memcpy(addr, bt_sink_addr, 6);
+
+			// addr[0] = 0x42;
+			// addr[1] = 0xfa;
+			// addr[2] = 0xbf;
+			// addr[3] = 0x75;
+			// addr[4] = 0xca;
+			// addr[5] = 0x26;
 			bt.connect_bluetooth(addr);
 		}
 	}
