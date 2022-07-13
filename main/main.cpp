@@ -233,6 +233,14 @@ static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 	return 0;
 }
 
+static void check_sd_card_during_play()
+{
+	if (!gpio_get_level(PIN_NUM_CD) && !nyan_mode)
+	{
+		playing = false;
+	}
+}
+
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 {
 	uint32_t val = 0;
@@ -241,10 +249,7 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	//static uint16_t sample_rate = 0;
 
 	//sd card detect
-	if (!gpio_get_level(PIN_NUM_CD))
-	{
-		playing = false;
-	}
+	check_sd_card_during_play();
 
 	if (!(playing) || i2s_output) // || !has_started)
 	{
@@ -303,10 +308,7 @@ void vI2SOutput( void * pvParameters )
 	while (1)
 	{
 		//sd card detect
-		if (!gpio_get_level(PIN_NUM_CD))
-		{
-			playing = false;
-		}
+		check_sd_card_during_play();
 
 		if (playing && i2s_output && has_started)
 		{
@@ -379,15 +381,16 @@ void vMp3Decode( void * pvParameters )
 	short * fillBuff;
 	uint8_t pass = 0;
 
+	if (sd_initialized)
+	{
+		FileNavi::goto_first_mp3();
+		full_path = FileNavi::get_current_full_name();
+		full_path_len = strlen(full_path);
+	}
 
-	FileNavi::goto_first_mp3();
-	full_path = FileNavi::get_current_full_name();
-	full_path_len = strlen(full_path);
-
-
-	ESP_LOGI("main", "starting mp3 decode task");
+	ESP_LOGI("main:mp3decode", "starting mp3 decode task");
 	
-	MP3Player* player;
+	MP3Player* player = NULL;
 
 	while (1)
 	{
@@ -395,20 +398,18 @@ void vMp3Decode( void * pvParameters )
 		f_change_file = false;
 		has_started = false;
 
-
-		if (nyan_mode)
+		if (sd_initialized)
 		{
-			printf("loading nyan mp3\n");
-			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
-			player = new MP3Player(NYAN_MP3_PATH, 0);
-		}
-		else
-		{
-			printf("loading file %s\n", FileNavi::get_current_full_name());
+			ESP_LOGI("main:mp3decode", "loading file %s\n", FileNavi::get_current_full_name());
 			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
 			player = new MP3Player(FileNavi::get_current_full_name(), 0);
 		}
-
+		else //nyan mode is the only thing that can work if sd card is not initialized
+		{
+			ESP_LOGI("main:mp3decode", "loading nyan mp3\n");
+			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
+			player = new MP3Player(NYAN_MP3_PATH, 0);			
+		}		
 
 
 		while(1)
@@ -419,7 +420,7 @@ void vMp3Decode( void * pvParameters )
 				#ifdef DEBUG
 					char * tasks = (char *)malloc(sizeof(char) * 1000) ;
 					vTaskList(tasks);
-					printf("Tasks: %s\n", tasks);
+					ESP_LOGI("main:mp3decode", "Tasks: %s", tasks);
 					free(tasks);
 					playing = false;
 				#endif		
@@ -442,7 +443,7 @@ void vMp3Decode( void * pvParameters )
 			if (f_change_file)
 			{
 				f_muted = true; //just to avoid the skipping sound when changing songs.				
-				printf("Changing file\n");
+				ESP_LOGI("main:mp3decode", "Changing file");
 				// vTaskDelay(pdMS_TO_TICKS(100));	
 				break;
 			}
@@ -463,11 +464,11 @@ void vMp3Decode( void * pvParameters )
 		
 					total_samples = 0;
 					has_started = true;
-					ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
+					ESP_LOGI("main:mp3decode", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
 					output->start(player->info.hz);
 					current_sample_rate = player->info.hz;
 				
-					ESP_LOGI("main", "i2s output started");
+					ESP_LOGI("main:mp3decode", "i2s output started");
 
 					if (sample_rate != current_sample_rate)
 					{
@@ -485,9 +486,9 @@ void vMp3Decode( void * pvParameters )
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
 			{
-				if (!nyan_mode && !repeat_mode)
+				if (!nyan_mode && !repeat_mode && sd_initialized)
 				{
-					ESP_LOGI("main", "Done with current song. Going to next file.");
+					ESP_LOGI("main:mp3decode", "Done with current song. Going to next file.");
 					FileNavi::goto_next_mp3();
 					//For display
 					full_path = FileNavi::get_current_full_name();
@@ -506,7 +507,10 @@ void vMp3Decode( void * pvParameters )
 		// vTaskDelay(pdMS_TO_TICKS(100));
 		output->stop();
 		
-		player->dispose();
+		if (player)
+		{
+			player->dispose();
+		}
 		
 	}
 
@@ -659,24 +663,26 @@ extern "C" void app_main(void)
 		init_adc();
 
 		SDCard* sdc = new SDCard();
+		init_colors(pixel_colors);
 
-		if (!gpio_get_level(PIN_NUM_CD))
+		if (gpio_get_level(PIN_NUM_CD))
 		{
-			initializing = false;
-			printf("SD Card not detected. Haulting init.");
-			return;	
+			printf("SD Card detected. Init SC and SPIFFS.");
+			sdc->init();
+			sd_initialized = true;
+
+
+
+			
 		}
 		
-		sdc->init();
-		sd_initialized = true;
 
-		init_spiffs();
-		esp_vfs_spiffs_register(&spiffs_cfg);
-
-		init_colors(pixel_colors);
+			init_spiffs();
+			esp_vfs_spiffs_register(&spiffs_cfg);
 		
-		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2250, NULL, configMAX_PRIORITIES - 5, &i2sTaskHandle, 0);
 		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 17250, NULL, 10, &mp3TaskHandle, 1);	
+		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2250, NULL, configMAX_PRIORITIES - 5, &i2sTaskHandle, 0);
+		
 
 		//We can skip BT startup if the sink device is not selected because the mcu will be reset before one is selected
 		if (bt_enabled)
