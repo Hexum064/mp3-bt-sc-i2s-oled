@@ -54,7 +54,9 @@
         "*.inc": "cpp",
         "cmath": "cpp",
         "btc_task.h": "c",
-        "dc30_buff.h": "c"
+        "dc30_buff.h": "c",
+        "system_error": "cpp",
+        "typeinfo": "cpp"
     },
     "idf.flashType": "UART",
     "cSpell.words": [

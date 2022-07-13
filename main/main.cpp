@@ -398,7 +398,7 @@ void vMp3Decode( void * pvParameters )
 		f_change_file = false;
 		has_started = false;
 
-		if (sd_initialized)
+		if (sd_initialized && !nyan_mode)
 		{
 			ESP_LOGI("main:mp3decode", "loading file %s\n", FileNavi::get_current_full_name());
 			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
@@ -536,7 +536,11 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	//The check for discovery mode only happens once because the mcu is reset when switching between modes.
 	if (bt_discovery_mode)
 	{
+		ssd1306_clear_screen(&oled_display, false);
 		sprintf(header, "  Discovering. Current: %s", bt_sink_name);
+
+
+
 		while (1)
 		{
 			
@@ -562,7 +566,7 @@ void vOLEDDisplayUpdate(void * pvParameters)
 			scroll_text(header, strlen(header), MAX_CHARS, scroll_pos, str_buff);		
 			ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
 
-			oled_display_discovery_mode(&oled_display);
+			oled_display_discovery_mode(&oled_display, bt_sink_name);
 			vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
 		}
 	}

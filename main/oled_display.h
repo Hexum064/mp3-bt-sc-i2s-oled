@@ -96,10 +96,11 @@ void oled_display_normal_mode(SSD1306_t *oled_display)
 
 
 
-void oled_display_discovery_mode(SSD1306_t *oled_display)
+void oled_display_discovery_mode(SSD1306_t *oled_display, char * current)
 {
 	char str_buff[MAX_CHARS + 1];
-	
+	uint8_t start_index = 0;
+	bool selected = false;
 	//Then "xx of yy"
 	//Then show up to 6. highlight the current index.
 	if (bt_discovered_count == 0)
@@ -108,15 +109,40 @@ void oled_display_discovery_mode(SSD1306_t *oled_display)
 	}
 	else
 	{
-		sprintf(str_buff, "%02d of %02d      ", bt_device_list_index + 1, bt_discovered_count );
+		memset(str_buff, ' ', 16);
+		sprintf(str_buff, "%02d of %02d", bt_device_list_index + 1, bt_discovered_count );
 	}
 
-	ssd1306_display_text(oled_display, 1, str_buff, strlen(str_buff), false);
+	ssd1306_display_text(oled_display, 1, str_buff, 16, false);
 
-	for (uint8_t i = 0; i < 6 && i < bt_discovered_count; i++)
+	if (bt_device_list_index >= bt_discovered_count)
 	{
-		ssd1306_display_text(oled_display, i + 2, (char *)bt_discovered_devices[i].name, strlen((char *)bt_discovered_devices[i].name), bt_device_list_index == i);
+		bt_device_list_index = 0;
+	}
 
+	if (bt_device_list_index > 3)
+	{
+		start_index = bt_device_list_index - 3;
+	}
+	if (bt_device_list_index + 4 > bt_discovered_count && bt_discovered_count > 6)
+	{
+		start_index = bt_discovered_count - 6;
+	}
+
+//printf("start: %u, selected: %u, count: %u\n", start_index, bt_device_list_index, bt_discovered_count);
+
+	for (uint8_t i = 0; i < 6; i++)
+	{
+		memset(str_buff, ' ', 16);
+		selected = false;
+
+		if (i + start_index < bt_discovered_count)
+		{
+			selected = bt_device_list_index == i + start_index || (current && !(strcmp(current, (char *)bt_discovered_devices[i + start_index].name)));
+			memcpy(str_buff, bt_discovered_devices[i + start_index].name, strlen((char *)bt_discovered_devices[i + start_index].name));	
+			//printf("Adding device %s, start: %u, selected: %u, count: %u\n", bt_discovered_devices[i + start_index].name, start_index, bt_device_list_index, bt_discovered_count);
+		}
+		ssd1306_display_text(oled_display, i + 2, str_buff, 16,  selected);
 	}
 
 }
