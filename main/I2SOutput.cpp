@@ -8,11 +8,7 @@ I2SOutput::I2SOutput(i2s_port_t i2s_port, i2s_pin_config_t &i2s_pins) : Output(i
 }
 
 void I2SOutput::start(int sample_rate)
-{
-    if (installed)
-        i2s_driver_uninstall(m_i2s_port);
-
-    installed = false;
+{   
 
     // i2s config for writing both channels of I2S
     i2s_config_t i2s_config {
@@ -28,7 +24,16 @@ void I2SOutput::start(int sample_rate)
         .tx_desc_auto_clear = true,
         .fixed_mclk = 0 };
     //install and start i2s driver
+    // if (installed)
+    // {
+    //     installed = false;
+    //     ESP_LOGI("I2SOutput", "Uninstalling driver");
+    //     i2s_stop(m_i2s_port);
+    //     i2s_driver_uninstall(m_i2s_port);
+
+    // }    
     ESP_LOGI("I2SOutput", "Installing driver");
+
     i2s_driver_install(m_i2s_port, &i2s_config, 0, NULL);
     installed = true;
     // set up the i2s pins
@@ -36,8 +41,10 @@ void I2SOutput::start(int sample_rate)
     i2s_set_pin(m_i2s_port, &m_i2s_pins);
     // clear the DMA buffers
     ESP_LOGI("I2SOutput", "clearing dma");
+    vTaskDelay(pdMS_TO_TICKS(100));
     i2s_zero_dma_buffer(m_i2s_port);
 
     ESP_LOGI("I2SOutput", "Starting I2S");
     i2s_start(m_i2s_port);
+    started = true;
 }

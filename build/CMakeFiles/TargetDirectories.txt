@@ -666,8 +666,11 @@ M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/wifi_provisioning/CMakeFiles/list_inst
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/wifi_provisioning/CMakeFiles/install/strip.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/install/local.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/install.dir
-M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/edit_cache.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/__idf_main.dir
+M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/edit_cache.dir
+M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/spiffs_storage_bin.dir
+M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/storage-flash.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/rebuild_cache.dir
+M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/encrypted-storage-flash.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/list_install_components.dir
 M:/ESP32/mp3-bt-sc-i2s-oled/build/esp-idf/main/CMakeFiles/install/strip.dir

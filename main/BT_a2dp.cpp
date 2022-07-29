@@ -234,7 +234,7 @@ static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t *param)
 				{
 					found_devices_cb(found_devices, found_device_count);
 				}
-				//TODO: call callback to update display of found devices
+			
 			}
 			return;
 		}
@@ -779,8 +779,24 @@ bool BT_a2dp::discover_sinks(esp_a2d_found_devices_cb_t callback)
 {
 
 	found_devices_cb = callback;
+
+
+
 	f_discover = true;
 	found_device_count = 0;
+
+// memcpy(found_devices[0].name, "one", 4);
+// memcpy(found_devices[1].name, "two", 4);
+// memcpy(found_devices[2].name, "three ", 6);
+// memcpy(found_devices[3].name, "four", 5);
+// memcpy(found_devices[4].name, "five", 5);
+// memcpy(found_devices[5].name, "six", 4);
+// memcpy(found_devices[6].name, "seven", 6);
+// memcpy(found_devices[7].name, "eight", 6);
+
+// found_device_count = 8;
+// found_devices_cb(found_devices, found_device_count);
+
 	return init_bluetooth();
 
 }

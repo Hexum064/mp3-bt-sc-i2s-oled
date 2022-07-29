@@ -1,5 +1,6 @@
-#define FIXED_POINT 16
+//TODO: Fix found BT device list scrolling
 
+#include "defines.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -21,67 +22,30 @@
 #include "rgb_led_displays.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
-
-extern "C" {
-
-	#include "btc_av.h"
+#include "oled_display.h"
+#include "sdkconfig.h"
+extern "C"
+{
+	#include "btc_a2dp_source.h"
 }
 
-#define CONFIG_SPEAKER_NAME "Q50"
-#define BT_SINK_NOT_SELECTED_NAME "<NOT SELECTED>"
-#define BYTE_SAMPLES_PER_FRAME (MINIMP3_MAX_SAMPLES_PER_FRAME * 2) //MINIMP3_MAX_SAMPLES_PER_FRAME is number of short samples so this is for total bytes
+TaskHandle_t buttonsTaskHandle = NULL;
+TaskHandle_t oledTaskHandle = NULL;
+TaskHandle_t i2sTaskHandle = NULL;
 
 
-// speaker settings - if using I2S
-#define I2S_SPEAKER_SERIAL_CLOCK GPIO_NUM_4
-#define I2S_SPEAKER_LEFT_RIGHT_CLOCK GPIO_NUM_5
-#define I2S_SPEAKER_SERIAL_DATA GPIO_NUM_18
-
-#define BUTTON_BIT_0 GPIO_NUM_2
-#define BUTTON_BIT_1 GPIO_NUM_16
-#define BUTTON_BIT_2 GPIO_NUM_17
-
-#define DISPLAY_SDA	GPIO_NUM_21
-#define DISPLAY_SCL GPIO_NUM_22
-#define DISPLAY_RST GPIO_NUM_NC
-
-#define FRONT_DISPLAY_PIN GPIO_NUM_27
-
-#define OLED_DISP_INT 250
-
-#define SHORT_BUTTON_PUSH 50000ULL
-#define LONG_BUTTON_HOLD 750000ULL
-
-#define VOL_UP_BUTTON 7
-#define VOL_DOWN_BUTTON 6
-#define DISPLAY_BUTTON 5
-#define OUTPUT_BUTTON 4
-#define NEXT_BUTTON 3
-#define PAUSE_BUTTON 2
-#define PREVIOUS_BUTTON 1
-
-#define SCROLL_HOLD 4
-
-#define NYAN_BASE_PATH "/nyan_data"
-#define NYAN_MP3_PATH "/nyan_data/Nyan3.mp3"
-
-#define ADC_BATT_ATTEN ADC_ATTEN_DB_6
-
-TaskHandle_t mp3TaskHandle = NULL;
 
 short buff0[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 short buff1[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
 uint8_t buff_num = 0;
-
-float prev_volume;
-bool initializing = false;
+int buff_pos = 0;
 
 bool has_started = false;
 
 bool f_muted = false;
-bool sd_initialized = false;
+
 Output *output = NULL;
-int buff_pos = 0;
+
 i2s_pin_config_t i2s_speaker_pins;
 
 esp_vfs_spiffs_conf_t spiffs_cfg;
@@ -108,7 +72,7 @@ void init_audio_out()
 {
 	// i2s speaker pins
 i2s_pin_config_t i2s_speaker_pins = {
-	.mck_io_num = I2S_PIN_NO_CHANGE,
+	.mck_io_num = I2S_SPEAKER_MASTER_CLOCK,
     .bck_io_num = I2S_SPEAKER_SERIAL_CLOCK,
     .ws_io_num = I2S_SPEAKER_LEFT_RIGHT_CLOCK,
     .data_out_num = I2S_SPEAKER_SERIAL_DATA,
@@ -149,12 +113,13 @@ void init_display()
 	ssd1306_display_text(&oled_display, 1, foxs_random, 12, false);
 	ssd1306_display_text(&oled_display, 2, access_memories, 16, false);
 	ssd1306_display_text(&oled_display, 3, dc30, 4, false);
-
+	ssd1306_display_text(&oled_display, 7, FIRMWARE_VERSION, 16, false);
+	
 	vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
 
-void init_rgb_led_spi()
+void init_rgb_led_spi(spi_dma_chan_t channel)
 {
 
 
@@ -166,10 +131,10 @@ void init_rgb_led_spi()
         .quadhd_io_num = -1,
         .max_transfer_sz = 4000
     };
-   	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH1));
+   	printf("SPI init: %d\n", spi_bus_initialize(SPI3_HOST, &bus_cfg, channel));
     spi_device_interface_config_t devcfg={
         .mode = 0,          //SPI mode 0        
-		.clock_speed_hz = 800000, //Should be 800KHz
+		.clock_speed_hz = 400000, //Should be 800KHz, slowed down because our spi to async RGB is too slow
         .spics_io_num = -1,
         .queue_size = 1
     };
@@ -237,7 +202,7 @@ void init_bt_device_info()
 
 }
 
-void adc_init()
+void init_adc()
 {
 	ESP_LOGI("main", "Starting ADC Init\n");
 	printf("adc1 config width: %d\n", adc1_config_width((adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT));
@@ -254,6 +219,9 @@ void adc_init()
 }
 
 
+
+
+
 static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 {
 	bt_discovered_devices = devices;
@@ -265,6 +233,14 @@ static uint8_t esp_a2d_found_devices_cb(bt_device_param *devices, uint8_t count)
 	return 0;
 }
 
+static void check_sd_card_during_play()
+{
+	if (!gpio_get_level(PIN_NUM_CD) && !nyan_mode)
+	{
+		playing = false;
+	}
+}
+
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 {
 	uint32_t val = 0;
@@ -272,23 +248,19 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	int shortLen = len >> 1;
 	//static uint16_t sample_rate = 0;
 
-	if (!gpio_get_level(PIN_NUM_CD))
-	{
-		playing = false;
-	}
+	//sd card detect
+	check_sd_card_during_play();
 
 	if (!(playing) || i2s_output) // || !has_started)
 	{
 		//ESP_LOGI("Main", "waiting");
-		//TODO: Harder this code to ensure it can't throw an exception
+
 		if (data)
 		{
 			memset(data, 0, len);
 		}
 		return len;
 	}
-
-
 
 	if (buff_num)
 	{
@@ -298,11 +270,11 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
 	//We can do this because the sample size is 2304 x 16bit, or 4608 x 8bit, and the len size is 512 x 8bit and, since 512 divides evenly in 4608, we will just rely on that
 	for (int i = 0; i < shortLen; i++ )
 	{
-			val = buff[buff_pos + i] + 0x7FFF ;
-			val *= f_muted ? 0 : (output_volume / MAX_VOL);
-			val >>= 1;
-			data[(i << 1)] = val & 0xff;
-			data[(i << 1) + 1] = (val >> 8) & 0xff;	
+		val = buff[buff_pos + i] + 0x7FFF ;
+		val *= f_muted ? 0 : (output_volume / MAX_VOL);
+		val >>= 1;
+		data[(i << 1)] = val & 0xff;
+		data[(i << 1) + 1] = (val >> 8) & 0xff;	
 	}
 	buff_pos += shortLen;
 	if (buff_pos == MINIMP3_MAX_SAMPLES_PER_FRAME * 2)
@@ -329,15 +301,14 @@ void vI2SOutput( void * pvParameters )
 {	
 	init_audio_out();
 	short * buff = buff0;
+	uint16_t i = 0;
 
 	ESP_LOGI("main", "Starting I2S task");
 
 	while (1)
 	{
-		if (!gpio_get_level(PIN_NUM_CD))
-		{
-			playing = false;
-		}
+		//sd card detect
+		check_sd_card_during_play();
 
 		if (playing && i2s_output && has_started)
 		{
@@ -353,7 +324,23 @@ void vI2SOutput( void * pvParameters )
 
 			//ESP_LOGI("main", "Outputting I2S");
 			output->set_volume(f_muted ? 0 : output_volume / MAX_VOL);
-			output->write(buff, MINIMP3_MAX_SAMPLES_PER_FRAME);
+			
+			//Left Right tests
+
+
+			for (i = 0; i < MINIMP3_MAX_SAMPLES_PER_FRAME; i++)
+			{
+				//buff[i * 2] = 0; //left
+				//buff[1 + (i * 2)] = 0; //right
+			}
+
+			if (!f_change_file) //one last check. This really should be made atomic
+			{	
+				// printf("Writing\n");
+				output->write(buff, MINIMP3_MAX_SAMPLES_PER_FRAME);
+				// printf("Output written\n");
+			}
+
 
 			if (buff_num)
 			{
@@ -368,6 +355,7 @@ void vI2SOutput( void * pvParameters )
 		}
 		else
 		{
+			// printf("i2s skipped\n");
 			//Keep the WDT happy
 			vTaskDelay(pdMS_TO_TICKS(100));
 		}
@@ -376,125 +364,13 @@ void vI2SOutput( void * pvParameters )
 
 void vButtonInput( void * pvParameters )
 {
-	uint8_t input = 0;
-	uint8_t last_input = 0;
-	bool held = false;
-	uint64_t start_time = 0;
-
 	init_button_input();
-
-	for( ;; )
+	while(1)
 	{
-		input = gpio_get_level(BUTTON_BIT_0) | (gpio_get_level(BUTTON_BIT_1) << 1) | (gpio_get_level(BUTTON_BIT_2) << 2);
-
-		if (input) // if input is not 0
-		{
-			if (last_input != input && !(held))
-			{
-				last_input = input;
-				start_time = esp_timer_get_time();
-				printf("button down: %d\n", input);
-			}
-			else 
-			{
-				if (esp_timer_get_time() - start_time > LONG_BUTTON_HOLD && !(held)) //Long Hold
-				{
-					printf("button long down: %d\n", last_input);
-					
-					last_input = 0;
-					start_time = 0;
-					held = true;					
-					
-					switch(input)
-					{
-						case PREVIOUS_BUTTON:						
-							break; //do nothing intentionally
-						case PAUSE_BUTTON:													
-							break; //do nothing intentionally
-						case NEXT_BUTTON:						
-							break; //do nothing intentionally
-						case OUTPUT_BUTTON:		
-							//This should reset the mcu so no need to do anything else
-							toggle_bt_discovery_mode();
-							
-							break;
-						case DISPLAY_BUTTON:					
-							toggle_nyan_mode();
-							break;
-						case VOL_DOWN_BUTTON:
-							volume_down();			
-							held = false;
-							last_input = input;
-							start_time = esp_timer_get_time();
-							break;
-						case VOL_UP_BUTTON:
-							volume_up();
-							held = false;
-							last_input = input;
-							start_time = esp_timer_get_time();
-							break;							
-					}
-
-
-				}
-			}
-		}
-		else
-		{
-			//check if we were pushing a button and clear everything
-
-			if (last_input && esp_timer_get_time() - start_time > SHORT_BUTTON_PUSH) // if a button was being pushed
-			{
-				printf("button short up: %d\n", last_input);
-
-				switch(last_input)
-				{
-					case PREVIOUS_BUTTON:
-						play_previous_song();
-						break;
-					case PAUSE_BUTTON:
-						toggle_play_pause();
-						break;
-					case NEXT_BUTTON:
-						play_next_song();
-						break;
-					case OUTPUT_BUTTON:
-						toggle_output();
-						break;
-					case DISPLAY_BUTTON:
-						cycle_display();
-						break;
-					case VOL_DOWN_BUTTON:
-						volume_down();						
-						break;
-					case VOL_UP_BUTTON:
-						volume_up();
-						break;							
-				}
-
-			}
-
-			last_input = 0;
-			start_time = 0;
-			held = false;
-		}
-
-		//If the Card Detect goes low, it means the card was removed so it get's uninitialized
-		if (!gpio_get_level(PIN_NUM_CD))
-		{
-			sd_initialized = false;
-		}
-
-		//if the sd card was not initialized but the card detect signal goes high, it means the card was inserted
-		//after startup so it's best to restart now.
-		if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing)
-		{
-			esp_restart();
-		}
-
-	
+		handle_button_input();
 		vTaskDelay(pdMS_TO_TICKS(25));
 	}
+	
 }
 
 void vMp3Decode( void * pvParameters )
@@ -503,15 +379,18 @@ void vMp3Decode( void * pvParameters )
 
 	int sample_len = 0;
 	short * fillBuff;
+	uint8_t pass = 0;
 
-	FileNavi::goto_first_mp3();
-	full_path = FileNavi::get_current_full_name();
-	full_path_len = strlen(full_path);
+	if (sd_initialized)
+	{
+		FileNavi::goto_first_mp3();
+		full_path = FileNavi::get_current_full_name();
+		full_path_len = strlen(full_path);
+	}
 
-
-	ESP_LOGI("main", "starting mp3 decode task");
+	ESP_LOGI("main:mp3decode", "starting mp3 decode task");
 	
-	MP3Player* player;
+	MP3Player* player = NULL;
 
 	while (1)
 	{
@@ -519,36 +398,41 @@ void vMp3Decode( void * pvParameters )
 		f_change_file = false;
 		has_started = false;
 
-
-		if (nyan_mode)
+		if (sd_initialized && !nyan_mode)
 		{
-			printf("loading nyan mp3\n");
+			ESP_LOGI("main:mp3decode", "loading file %s\n", FileNavi::get_current_full_name());
 			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
-			player = new MP3Player(NYAN_MP3_PATH);
+			player = new MP3Player(FileNavi::get_current_full_name(), 0);
 		}
-		else
+		else //nyan mode is the only thing that can work if sd card is not initialized
 		{
-			printf("loading file %s\n", FileNavi::get_current_full_name());
+			ESP_LOGI("main:mp3decode", "loading nyan mp3\n");
 			vTaskDelay(pdMS_TO_TICKS(100)); //changing files does not work correctly without a little delay
-			player = new MP3Player(FileNavi::get_current_full_name());
-		}
-
-
+			player = new MP3Player(NYAN_MP3_PATH, 0);			
+		}		
 
 
 		while(1)
 		{
 
-
-
+			if (get_a2dp_src_tx_err())
+			{
+				#ifdef DEBUG
+					char * tasks = (char *)malloc(sizeof(char) * 1000) ;
+					vTaskList(tasks);
+					ESP_LOGI("main:mp3decode", "Tasks: %s", tasks);
+					free(tasks);
+					playing = false;
+				#endif		
+			}
 			//Only pause after we have started the output (decoding has actually happened)
 			if (player->is_output_started)
 			{
+				// printf("suspending\n");
 				vTaskSuspend( mp3TaskHandle );
 			}
 
-
-
+			pass = 0;
 			fillBuff = buff1;
 
 			if (buff_num) 
@@ -559,7 +443,7 @@ void vMp3Decode( void * pvParameters )
 			if (f_change_file)
 			{
 				f_muted = true; //just to avoid the skipping sound when changing songs.				
-				printf("Changing file\n");
+				ESP_LOGI("main:mp3decode", "Changing file");
 				// vTaskDelay(pdMS_TO_TICKS(100));	
 				break;
 			}
@@ -569,79 +453,32 @@ void vMp3Decode( void * pvParameters )
 				update_front_display(fillBuff);
 			}
 			
-			player->decodeSample(fillBuff, &sample_len);
-			total_samples += sample_len;
-
-			if (sample_len > 0 && !has_started) //make sure this only happens once
+			while(pass < 2)
 			{
-	
-				total_samples = 0;
-				has_started = true;
-				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
-				output->start(player->info.hz);
-				current_sample_rate = player->info.hz;
-			
-				ESP_LOGI("main", "i2s output started");
+				// printf("decoding\n");
+				player->decodeSample(fillBuff + (MINIMP3_MAX_SAMPLES_PER_FRAME * pass), &sample_len);
+				total_samples += sample_len;
 
-				if (sample_rate != current_sample_rate)
+				if (sample_len > 0 && !has_started) //make sure this only happens once
 				{
-					sample_rate = current_sample_rate;
-
-					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
-					{
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(100));
-						// printf("Media state: %d\n", bt_control->get_media_state());
-						// printf("a2d state: %d\n", bt_control->get_a2d_state());
-						set_freq(current_sample_rate);
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
-					}
-					else
-					{
-						set_freq(current_sample_rate);
-					}
-					
-				}
-				f_muted = false;
-			}
-
-			player->decodeSample(fillBuff + MINIMP3_MAX_SAMPLES_PER_FRAME, &sample_len); 
-			total_samples += sample_len;
-
-
-
-			if (sample_len > 0 && !has_started) //make sure this only happens once
-			{
-
-				total_samples = 0;
-				has_started = true;
-				ESP_LOGI("main", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
-				output->start(player->info.hz);
-				current_sample_rate = player->info.hz;
+		
+					total_samples = 0;
+					has_started = true;
+					ESP_LOGI("main:mp3decode", "i2s output starting. Sample rate: %d, Channels: %d", player->info.hz, player->info.channels);
+					output->start(player->info.hz);
+					current_sample_rate = player->info.hz;
 				
-				ESP_LOGI("main", "i2s output started");
+					ESP_LOGI("main:mp3decode", "i2s output started");
 
-
-				if (sample_rate != current_sample_rate)
-				{
-					sample_rate = current_sample_rate;
-
-					if (bt_control->get_media_state() == APP_AV_MEDIA_STATE_STARTED)
+					if (sample_rate != current_sample_rate)
 					{
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
-						vTaskDelay(pdMS_TO_TICKS(100));
-						set_freq(current_sample_rate);
-						// printf("Media state: %d\n", bt_control->get_media_state());
-						// printf("a2d state: %d\n", bt_control->get_a2d_state());
-						esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+						sample_rate = current_sample_rate;
+
+						update_bt_sample_rate(bt_control);						
 					}
-					else
-					{
-						set_freq(current_sample_rate);
-					}
-					
+					f_muted = false;
 				}
-				f_muted = false;
+				pass++;
 			}
 
 
@@ -649,124 +486,37 @@ void vMp3Decode( void * pvParameters )
 			//sample_len of 0 means we reached the end of the file so we can go to the next one
 			if (!player->is_output_started && has_started)
 			{
-				if (!nyan_mode)
+				if (!nyan_mode && !repeat_mode && sd_initialized)
 				{
-					ESP_LOGI("main", "Done with current song. Going to next file.");
+					ESP_LOGI("main:mp3decode", "Done with current song. Going to next file.");
 					FileNavi::goto_next_mp3();
 					//For display
 					full_path = FileNavi::get_current_full_name();
 					full_path_len = strlen(full_path);
 					//end for display				
 				}
+
 				f_change_file = true;
 
 			}
 
 		}
 
-		player->dispose();
+
+		// printf("Stopping I2S and MP3 Decoder\n");
+		// vTaskDelay(pdMS_TO_TICKS(100));
+		output->stop();
+		
+		if (player)
+		{
+			player->dispose();
+		}
 		
 	}
 
 	printf("done with decode task\n");
 }
 
-void oled_display_normal_mode()
-{
-
-	int totalSeconds = get_runtime_seconds();
-	int minutes = totalSeconds / 60;
-	int seconds = totalSeconds % 60;
-
-	char disp_buff[24];	
-	
-	disp_buff[0] = '\0';
-
-	if (playing)
-	{
-		sprintf(disp_buff, "%02d:%02d Playing  ", minutes, seconds);	
-	}
-	else
-	{
-		sprintf(disp_buff, "%02d:%02d Paused   ", minutes, seconds);	
-	}
-
-
-
-	
-	ssd1306_display_text(&oled_display, 1, disp_buff, 16, false);
-
-	disp_buff[0] = '\0';
-
-	if (i2s_output)
-	{
-		sprintf(disp_buff, "Vol:%02d%% Out:i2s ", (int)((output_volume / MAX_VOL) * 100));	
-	}
-	else
-	{
-		sprintf(disp_buff, "Vol:%02d%% Out:BT  ", (int)((output_volume / MAX_VOL) * 100));	
-	}
-	
-	ssd1306_display_text(&oled_display, 2, disp_buff, 16, false);
-
-	disp_buff[0] = '\0';
-
-	if (bt_control->get_a2d_state() != 5)
-	{
-		sprintf(disp_buff, "BT Attaching to:");	
-								
-	}
-	else
-	{
-		sprintf(disp_buff, "BT Connected to:");	
-	}
-	
-	ssd1306_display_text(&oled_display, 3, disp_buff, 16, false);
-	ssd1306_display_text(&oled_display, 4, bt_sink_name, 16, false);
-	
-	if (nyan_mode)
-	{
-		sprintf(disp_buff, "   Nyan  Mode   ");	
-	}
-	else
-	{
-		sprintf(disp_buff, "Display mode: %d ", display_index);	
-		
-	}
-	
-	ssd1306_display_text(&oled_display, 5, disp_buff, 16, false);
-
-	sprintf(disp_buff, "Battery %d%%    ", get_batt_percent());
-	ssd1306_display_text(&oled_display, 6, disp_buff, 16, false);
-	
-}	
-
-
-
-void oled_display_discovery_mode()
-{
-	char str_buff[MAX_CHARS + 1];
-	
-	//Then "xx of yy"
-	//Then show up to 6. highlight the current index.
-	if (bt_discovered_count == 0)
-	{
-		sprintf(str_buff, "No Devices Found");
-	}
-	else
-	{
-		sprintf(str_buff, "%02d of %02d      ", bt_device_list_index + 1, bt_discovered_count );
-	}
-
-	ssd1306_display_text(&oled_display, 1, str_buff, strlen(str_buff), false);
-
-	for (uint8_t i = 0; i < 6 && i < bt_discovered_count; i++)
-	{
-		ssd1306_display_text(&oled_display, i + 2, (char *)bt_discovered_devices[i].name, strlen((char *)bt_discovered_devices[i].name), bt_device_list_index == i);
-
-	}
-
-}
 
 void vOLEDDisplayUpdate(void * pvParameters)
 {
@@ -775,7 +525,7 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	char header[45];
 	char str_buff[MAX_CHARS];
 	int scroll_hold = 0;
-	int scroll_pos = 0;
+	
 
 
 	init_display();
@@ -786,7 +536,11 @@ void vOLEDDisplayUpdate(void * pvParameters)
 	//The check for discovery mode only happens once because the mcu is reset when switching between modes.
 	if (bt_discovery_mode)
 	{
+		ssd1306_clear_screen(&oled_display, false);
 		sprintf(header, "  Discovering. Current: %s", bt_sink_name);
+
+
+
 		while (1)
 		{
 			
@@ -812,7 +566,7 @@ void vOLEDDisplayUpdate(void * pvParameters)
 			scroll_text(header, strlen(header), MAX_CHARS, scroll_pos, str_buff);		
 			ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
 
-			oled_display_discovery_mode();
+			oled_display_discovery_mode(&oled_display, bt_sink_name);
 			vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
 		}
 	}
@@ -857,7 +611,11 @@ void vOLEDDisplayUpdate(void * pvParameters)
 				ssd1306_display_text(&oled_display, 0, str_buff, 16, false);
 			}
 
-			oled_display_normal_mode();
+			oled_display_normal_mode(&oled_display);
+
+
+
+
 			vTaskDelay(pdMS_TO_TICKS(OLED_DISP_INT));
 
 			
@@ -892,51 +650,80 @@ extern "C" void app_main(void)
 		nvs_commit(bt_control->get_nvs_handle());		
 	}
 
-	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 1024*2, NULL, 1, NULL, 1);
-	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 1024*2, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(vButtonInput, "BUTTON_INPUT", 2250, NULL, 1, &buttonsTaskHandle, 1);
+	xTaskCreatePinnedToCore(vOLEDDisplayUpdate, "OLED_DISPLAY", 2250, NULL, 1, &oledTaskHandle, 1);
 
 	init_bt_device_info();
 
-	init_rgb_led_spi();
+	init_rgb_led_spi(SPI_DMA_CH1);
 
 	if (bt_discovery_mode)
 	{
-		//TODO: start with oled showing found devices
 		bt.discover_sinks(esp_a2d_found_devices_cb);
 	}
 	else
 	{		
 
-		adc_init();
+		init_adc();
 
 		SDCard* sdc = new SDCard();
-
-		if (!gpio_get_level(PIN_NUM_CD))
-		{
-			initializing = false;
-			return;	
-		}
-
-		sdc->init();
-		sd_initialized = true;
-
-		init_spiffs();
-		esp_vfs_spiffs_register(&spiffs_cfg);
-
 		init_colors(pixel_colors);
+
+		if (gpio_get_level(PIN_NUM_CD))
+		{
+			printf("SD Card detected. Init SC and SPIFFS.");
+			sdc->init();
+			sd_initialized = true;
+
+
+
+			
+		}
 		
-		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 1024*2, NULL, configMAX_PRIORITIES - 5, NULL, 1);
-		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 1024*17, NULL, 10, &mp3TaskHandle, 1);	
+
+			init_spiffs();
+			esp_vfs_spiffs_register(&spiffs_cfg);
+		
+		xTaskCreatePinnedToCore(vMp3Decode, "MP3_CORE", 17250, NULL, 10, &mp3TaskHandle, 1);	
+		xTaskCreatePinnedToCore(vI2SOutput, "I2S_OUTPUT", 2250, NULL, configMAX_PRIORITIES - 5, &i2sTaskHandle, 0);
+		
 
 		//We can skip BT startup if the sink device is not selected because the mcu will be reset before one is selected
 		if (bt_enabled)
 		{
+			//FOR TESTING: address 42:fa:bf:75:ca:26, name Q50
 			esp_bd_addr_t addr;
+			
 			memcpy(addr, bt_sink_addr, 6);
+
+			// addr[0] = 0x42;
+			// addr[1] = 0xfa;
+			// addr[2] = 0xbf;
+			// addr[3] = 0x75;
+			// addr[4] = 0xca;
+			// addr[5] = 0x26;
 			bt.connect_bluetooth(addr);
 		}
 	}
 	
 	initializing = false;
-	
+#ifdef DEBUG
+	while(1)
+	{
+		//HEAP INFO DEBUG CODE
+
+
+
+
+
+			size_t heap_block;
+			UBaseType_t buttons = uxTaskGetStackHighWaterMark(buttonsTaskHandle);
+			UBaseType_t oled = uxTaskGetStackHighWaterMark(oledTaskHandle);
+			UBaseType_t i2s = uxTaskGetStackHighWaterMark(i2sTaskHandle);
+			UBaseType_t mp3 = uxTaskGetStackHighWaterMark(mp3TaskHandle);
+			heap_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+			printf("Bytes Left -> buttons: %u, oled: %u, i2s: %u, mp3: %u, total heap bytes free bytes: %d, largest block: %d\n", buttons, oled, i2s, mp3, xPortGetFreeHeapSize(), heap_block );
+			vTaskDelay(pdMS_TO_TICKS(1000));
+	}
+#endif
 }

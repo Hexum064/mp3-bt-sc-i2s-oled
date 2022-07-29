@@ -24,10 +24,11 @@ idf_component_register(
         "M:/esp-idf-extension/esp-idf/components/bt/common/btc/include"
         "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/include"
         "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/btc/profile/std/a2dp/include"
-        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/external/sbc/encoder/include")
+        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/external/sbc/encoder/include"
+        "M:/esp-idf-extension/esp-idf/components/bt/host/bluedroid/common/include/common")
 
 # Create a SPIFFS image from the contents of the 'nyan_data' directory
 # that fits the partition named 'storage'. FLASH_IN_PROJECT indicates that
 # the generated image should be flashed when the entire project is flashed to
 # the target with 'idf.py -p PORT flash'.
-#spiffs_create_partition_image(storage ../nyan_data FLASH_IN_PROJECT)        
+spiffs_create_partition_image(storage ../nyan_data FLASH_IN_PROJECT)        

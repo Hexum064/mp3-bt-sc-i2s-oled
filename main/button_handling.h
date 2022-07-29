@@ -3,33 +3,40 @@
 
 #include "rgb_led_displays.h"
 #include "utilities.h"
+#include "defines.h"
 
-#define MAX_VOL 4096
-#define VOL_STEP (MAX_VOL / 16)
-#define MAX_DISPLAY_MODES 7
-#define SECONDS_TILL_RESET_CURRENT_SONG 2
 
 bool playing = false;
-bool i2s_output = false;
+bool i2s_output = true;
 bool bt_enabled = true;
 bool bt_discovery_mode = false;
 bool nyan_mode = false;
+bool repeat_mode = false;
+
 bt_device_param *bt_discovered_devices;
 uint8_t bt_discovered_count = 0;
 uint8_t bt_device_list_index = 0;
-BT_a2dp *bt_control;
 uint8_t display_index = 0;
-
+BT_a2dp *bt_control;
 char bt_discovery_mode_flag_key[] = "btd";
 char bt_sink_name_key[] = "btname";
 char bt_sink_addr_key[] = "btaddr_";
+
 //+ 1 for term char
 char bt_sink_name[MAX_BT_NAME_LEN + 1];
 uint8_t bt_sink_addr[6];
 float output_volume = MAX_VOL / 2;
+
 char * full_path;
 uint16_t full_path_len = 0;
+int scroll_pos = 0;
+
 bool f_change_file = false;
+bool initializing = false;
+bool sd_initialized = false;
+
+TaskHandle_t mp3TaskHandle = NULL;
+
 
 void toggle_play_pause()
 {
@@ -99,24 +106,6 @@ void toggle_output()
 
 void volume_up()
 {
-	if (output_volume < MAX_VOL)
-	{
-		output_volume += VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}
-}
-
-void volume_down()
-{
-	if (output_volume > 0)
-	{
-		output_volume -= VOL_STEP;
-		printf("Volume: %f\n", output_volume);
-	}		
-}
-
-void play_next_song()
-{
 	//Don't want to change songs in this mode 
 	if (bt_discovery_mode)
 	{
@@ -127,6 +116,36 @@ void play_next_song()
 		}
 		return;
 	}
+
+	if (output_volume < MAX_VOL)
+	{
+		output_volume += VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}
+}
+
+void volume_down()
+{
+	//Don't want to change songs in this mode 
+	if (bt_discovery_mode)
+	{
+		if (bt_device_list_index > 0)
+		{
+			ESP_LOGI("main", "Going to previous device.");
+			bt_device_list_index--;
+		}
+		return;
+	}
+
+	if (output_volume > 0)
+	{
+		output_volume -= VOL_STEP;
+		printf("Volume: %f\n", output_volume);
+	}		
+}
+
+void play_next_song()
+{
 
 	if (nyan_mode)
 	{
@@ -140,23 +159,12 @@ void play_next_song()
 	full_path_len = strlen(full_path);
 	//end for display	
 	f_change_file = true;
+	scroll_pos = 0;
 
 }
 
 void play_previous_song()
 {
-
-	//Don't want to change songs in this mode 
-	if (bt_discovery_mode)
-	{
-		if (bt_device_list_index > 0)
-		{
-			ESP_LOGI("main", "Going to previous device.");
-			bt_device_list_index--;
-		}
-		return;
-	}
-
 
 	if (nyan_mode)
 	{
@@ -176,7 +184,7 @@ void play_previous_song()
 	full_path_len = strlen(full_path);
 	//end for display	
 	f_change_file = true;
-
+	scroll_pos = 0;
 }
 
 void cycle_display()
@@ -223,8 +231,13 @@ void toggle_nyan_mode()
 		
 	}
 	f_change_file = true; //trigger the mp3 decoder to switch 
+    vTaskResume(mp3TaskHandle);	
 }
 
+void toggle_normal_repeat_mode()
+{
+    repeat_mode = !repeat_mode;
+}
 
 void update_front_display(short * buff)
 {
@@ -262,6 +275,135 @@ void update_front_display(short * buff)
 
 		}
 	}	
+}
+
+void handle_button_input()
+{
+    uint8_t input = 0;
+	static uint8_t last_input = 0;
+	static bool held = false;
+	static uint64_t start_time = 0;
+
+    input = gpio_get_level(BUTTON_BIT_0) | (gpio_get_level(BUTTON_BIT_1) << 1) | (gpio_get_level(BUTTON_BIT_2) << 2);
+
+#ifdef INVERSE_BUTTON_INPUT
+
+	input = (~input) & 0x07;
+
+#endif
+
+    if (input) // if input is not 0
+    {
+        if (last_input != input && !(held))
+        {
+            last_input = input;
+            start_time = esp_timer_get_time();
+            printf("button down: %d\n", input);
+        }
+        else 
+        {
+            if (esp_timer_get_time() - start_time > LONG_BUTTON_HOLD && !(held)) //Long Hold
+            {
+                printf("button long down: %d\n", last_input);
+                
+                last_input = 0;
+                start_time = 0;
+                held = true;					
+                
+                switch(input)
+                {
+                    case PREVIOUS_BUTTON:						
+                        break; //do nothing intentionally
+                    case PAUSE_BUTTON:	
+                        toggle_normal_repeat_mode();												
+                        break; //do nothing intentionally
+                    case NEXT_BUTTON:						
+                        break; //do nothing intentionally
+                    case OUTPUT_BUTTON:		
+                        //This should reset the mcu so no need to do anything else
+                        toggle_bt_discovery_mode();
+                        
+                        break;
+                    case DISPLAY_BUTTON:					
+                        toggle_nyan_mode();
+                        break;
+                    case VOL_DOWN_BUTTON:
+                        volume_down();	
+                        volume_down();
+                        volume_down();
+                        volume_down();		
+                        held = false;
+                        last_input = input;
+                        start_time = esp_timer_get_time();
+                        break;
+                    case VOL_UP_BUTTON:
+                        volume_up();
+                        volume_up();
+                        volume_up();
+                        volume_up();
+                        held = false;
+                        last_input = input;
+                        start_time = esp_timer_get_time();
+                        break;							
+                }
+
+
+            }
+        }
+    }
+    else
+    {
+        //check if we were pushing a button and clear everything
+
+        if (last_input && esp_timer_get_time() - start_time > SHORT_BUTTON_PUSH) // if a button was being pushed
+        {
+            printf("button short up: %d\n", last_input);
+
+            switch(last_input)
+            {
+                case PREVIOUS_BUTTON:
+                    play_previous_song();
+                    break;
+                case PAUSE_BUTTON:
+                    toggle_play_pause();
+                    break;
+                case NEXT_BUTTON:
+                    play_next_song();
+                    break;
+                case OUTPUT_BUTTON:
+                    toggle_output();
+                    break;
+                case DISPLAY_BUTTON:
+                    cycle_display();
+                    break;
+                case VOL_DOWN_BUTTON:
+                    volume_down();						
+                    break;
+                case VOL_UP_BUTTON:
+                    volume_up();
+                    break;							
+            }
+
+        }
+
+        last_input = 0;
+        start_time = 0;
+        held = false;
+    }
+
+    //If the Card Detect goes low, it means the card was removed so it get's uninitialized
+    if (!gpio_get_level(PIN_NUM_CD))
+    {
+        sd_initialized = false;
+    }
+
+    //if the sd card was not initialized but the card detect signal goes high, it means the card was inserted
+    //after startup so it's best to restart now.
+    if (gpio_get_level(PIN_NUM_CD) && !sd_initialized && !initializing && !bt_discovery_mode)
+    {
+        esp_restart();
+    }
+
 }
 
 #endif //BUTTON_HANDLING_H

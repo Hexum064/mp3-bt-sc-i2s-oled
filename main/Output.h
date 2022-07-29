@@ -13,8 +13,10 @@ protected:
 
   int16_t *frames_buffer;
   float volume = 1.0f;
-
+  bool started = false;
+  
 public:
+
   Output(i2s_port_t i2s_port);
   virtual ~Output();
   virtual void start(int sample_rate) = 0;
