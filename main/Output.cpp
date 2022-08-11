@@ -46,8 +46,8 @@ void Output::write(int16_t *samples, int frames)
     int frames_to_send = 0;
     for (int i = 0; i < NUM_FRAMES_TO_SEND && frame_index < frames; i++)
     {
-      int left_sample = process_sample(volume * float(samples[frame_index * 2]));
-      int right_sample = process_sample(volume * float(samples[frame_index * 2 + 1]));
+      int left_sample = process_sample(volume * float(samples[frame_index * 2 + 1]));
+      int right_sample = process_sample(volume * float(samples[frame_index * 2]));
       frames_buffer[i * 2] = left_sample;
       frames_buffer[i * 2 + 1] = right_sample;
       frames_to_send++;
