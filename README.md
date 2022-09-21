@@ -1,3 +1,5 @@
+Bluetooth params for sample rates: https://github.com/espressif/esp-idf/issues/1720
+
 # _Sample project_
 
 (See the README.md file in the upper level 'examples' directory for more information about examples.)
